@@ -118,6 +118,24 @@ describe('enrichment', () => {
       isError: false,
     }
     expect(parseHistory(asArrays)).toEqual({ rows: [expect.objectContaining({ statement_id: 'y', produced_rows: 5 })] })
+    // The databricks-sql MCP (DBSQL statement API) wraps each row as { values: [{ string_value }] }.
+    const asValueCells = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            statement_id: 'outer',
+            status: { state: 'SUCCEEDED' },
+            manifest: { format: 'JSON_ARRAY', schema: { columns: [{ name: 'statement_id' }, { name: 'produced_rows' }, { name: 'error_message' }] } },
+            result: { data_array: [{ values: [{ string_value: 'z' }, { string_value: '7' }, { null_value: 'NULL_VALUE' }] }] },
+          }),
+        },
+      ],
+      isError: false,
+    }
+    expect(parseHistory(asValueCells)).toEqual({
+      rows: [expect.objectContaining({ statement_id: 'z', produced_rows: 7, error_message: undefined })],
+    })
     expect(parseHistory({ content: [{ type: 'text', text: 'PERMISSION_DENIED: system.query' }], isError: true })).toEqual({
       error: 'PERMISSION_DENIED: system.query',
     })
@@ -213,6 +231,7 @@ const harness = (on: Parameters<TestBody>[1]) => {
   const mcpCalls: { server: string; tool: string; args: Record<string, unknown> }[] = []
   const opened: string[] = []
   let history: unknown = { content: [{ type: 'text', text: '[]' }], isError: false }
+  let cwd = '/r'
 
   on('fs.read', (_$, e) => {
     const text = files.get(e.path)
@@ -240,7 +259,8 @@ const harness = (on: Parameters<TestBody>[1]) => {
   on('ui.close', () => ({ value: undefined }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'sess-1' }))
-  on('session.cwd', () => ({ value: '/r' }))
+  on('session.cwd', () => ({ value: cwd }))
+  on('session.root', () => ({ value: '/r' }))
   on('ui.render', { component: 'AbovePrompt' }, ($e, e) => h($e.ui.resolve(e).Box, {}) as RenderElement)
   on('tool.call', { tool: TOOL }, (_$, e) => {
     sent.push({ ...(e as Record<string, unknown>) })
@@ -257,6 +277,9 @@ const harness = (on: Parameters<TestBody>[1]) => {
     opened,
     setHistory: (value: unknown) => {
       history = value
+    },
+    setCwd: (dir: string) => {
+      cwd = dir
     },
     lines: () => latestPerId(files.get('/r/.claude/dbx-trace/sess-1.jsonl') ?? ''),
   }
@@ -447,4 +470,16 @@ test('a headless session never opens the panel', async ($, on) => {
   await $.session.start({ cwd: '/r', surface: null, isInteractive: false } as never)
   await $.tool.call({ tool: TOOL, statement: 'SELECT 1' } as never)
   expect(h_.opened).toEqual([])
+})
+
+test('the trace stays at the project root when the shell has cd-ed elsewhere', async ($, on) => {
+  const h_ = harness(on)
+  await $.session.start({ cwd: '/r', surface: null } as never)
+  h_.setCwd('/r/dbx-trace/hooks')
+  await $.tool.call({ tool: TOOL, statement: 'SELECT count(*) FROM rcm_dev.charges.t' } as never)
+  h_.setCwd('/other/repo')
+  await $.tool.call({ tool: TOOL, statement: 'SELECT count(*) FROM rcm_dev.charges.u' } as never)
+
+  expect(h_.lines().map(l => l.tables_read)).toEqual([['rcm_dev.charges.t'], ['rcm_dev.charges.u']])
+  expect([...h_.files.keys()].filter(k => !k.startsWith('/r/.claude/dbx-trace/'))).toEqual([])
 })

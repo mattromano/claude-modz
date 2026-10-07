@@ -110,7 +110,8 @@ let branch: string | undefined
 const denials = new Map<string, string>()
 
 
-const paths = async ($: $) => tracePaths(await $.session.cwd(), await $.session.id())
+// The project root, not the shell's cwd: a `cd` in a Bash call must not scatter one session's trace.
+const paths = async ($: $) => tracePaths(await $.session.root(), await $.session.id())
 
 const queue = (work: () => Promise<void>) => {
   const run = writes.then(work, work)
@@ -228,7 +229,7 @@ const writePage = async ($: $) => {
   const list = await read($, events)
   if (list.length === 0) return undefined
   const p = await paths($)
-  const cwd = await $.session.cwd()
+  const cwd = await $.session.root()
   const html = renderPage({
     sessionId: await $.session.id(),
     branch,
