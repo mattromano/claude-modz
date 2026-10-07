@@ -11,7 +11,7 @@ A side pane that records every dbt command Claude runs through Bash.
 - **Captures** the standard dbt console output (what you'd see in your terminal, not `logs/dbt.log`) for `run`, `build`, `test`, `seed`, `snapshot`, `compile`, `show`, `ls`, `retry`, `clone`, `run-operation`. Housekeeping (`deps`, `clean`, `debug`) is ignored.
 - **Live**: output is tee'd to a log file as it streams, so backgrounded and long-running jobs are tracked too. The pane tails the run while it's going.
 - **History** across all sessions: start time, repo, command, status (✓ / ⚠ / ✗), duration, `PASS/WARN/ERROR/SKIP` counts, size on disk.
-- **Click into** any run for its summary and the last 500 lines of output.
+- **Open** any run (click in fullscreen mode, or `1`–`9` / arrows + Enter) for its summary and the last 500 lines of output.
 - **Clean up**: delete a run, `Clear finished`, or `Clear >7d`.
 
 Logs live in `~/.claude/claude-modz/dbt-runs/`; the run index lives in the plugin's store.

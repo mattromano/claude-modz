@@ -138,7 +138,12 @@ const clearFinished = async ($: $, olderThanMs?: number) => {
   return ids.length
 }
 
-const openPane = ($: $) => $.ui.open({ id: PANE, title: TITLE })
+// Opened by the person it takes the keys; opened by a run starting it only shows.
+const openPane = ($: $, focus?: true) => $.ui.open({ id: PANE, title: TITLE, ...(focus ? { focus } : {}) })
+
+// The main screen reports no clicks and opens panes inline, so a run only pops the
+// pane open unasked where the terminal docks it beside the transcript.
+let isDocked = false
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -168,7 +173,7 @@ export const register: Register = on => {
       return { text: `Deleted ${await clearFinished($, WEEK_MS)} dbt runs older than 7 days.` }
     }
     await update($, view, (): DbtRunsView => ({ kind: 'list' }))
-    await openPane($)
+    await openPane($, true)
 
     return { text: 'dbt runs pane opened.' }
   })
@@ -193,7 +198,7 @@ export const register: Register = on => {
     }
     await saveRun($, run)
     const panes = await $.ui.panes()
-    if (!panes.some(p => p.id === PANE)) void openPane($)
+    if (isDocked && !panes.some(p => p.id === PANE)) void openPane($)
 
     const ran = await next({ ...e, command: wrapCommand(e.command, run.logPath, run.rcPath) })
     if (ran.deny !== undefined) {
@@ -213,6 +218,10 @@ export const register: Register = on => {
     const current = await read($, view)
     const now = await $.clock.now()
     const setView = (v: DbtRunsView) => () => void update($, view, () => v)
+    isDocked = e.viewport?.isFullscreen === true
+    const hint = (keys: string) => (
+      <Text dimColor>{e.props.isFocused ? keys : 'ctrl+x tab to focus this pane'}</Text>
+    )
 
     const detail = current.kind === 'detail' ? list.find(r => r.id === current.id) : undefined
     if (detail !== undefined) {
@@ -223,7 +232,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
-            <Button key="back" hotkey="b" onPress={setView({ kind: 'list' })}>
+            <Button key="back" hotkey="b" autoFocus onPress={setView({ kind: 'list' })}>
               Back
             </Button>
             {detail.status !== 'running' && (
@@ -252,6 +261,7 @@ export const register: Register = on => {
               </Text>
             </Text>
           )}
+          {hint(detail.status === 'running' ? 'b back · Esc close' : 'b back · d delete · Esc close')}
           <Text dimColor wrap="wrap">
             $ {detail.command}
           </Text>
@@ -269,16 +279,17 @@ export const register: Register = on => {
         </Text>
         {list.length > 0 && (
           <Box flexDirection="row" gap={1}>
-            <Button key="clear-finished" dimColor onPress={() => void clearFinished($)}>
+            <Button key="clear-finished" hotkey="c" dimColor onPress={() => void clearFinished($)}>
               Clear finished
             </Button>
-            <Button key="clear-week" dimColor onPress={() => void clearFinished($, WEEK_MS)}>
+            <Button key="clear-week" hotkey="w" dimColor onPress={() => void clearFinished($, WEEK_MS)}>
               Clear &gt;7d
             </Button>
           </Box>
         )}
+        {list.length > 0 && hint('1-9 open · ↑↓ move · Enter open · c clear finished · w clear >7d · Esc close')}
         {list.length === 0 && <Text dimColor>No dbt runs yet. They appear here as Claude runs them.</Text>}
-        {list.map(run => {
+        {list.map((run, i) => {
           const { glyph, color } = GLYPH[run.status]
           const elapsed = (run.finishedAt ?? now) - run.startedAt
           const head = `${formatTime(run.startedAt, now)}  ${run.repo}  `
@@ -291,8 +302,10 @@ export const register: Register = on => {
                 <Button
                   key={`open-${run.id}`}
                   plain
+                  {...(i < 9 ? { hotkey: String(i + 1) } : {})}
+                  {...(i === 0 ? { autoFocus: true as const } : {})}
                   onPress={setView({ kind: 'detail', id: run.id })}
-                  label={truncate(head + cmd, width - 2)}
+                  label={truncate(head + cmd, width - (i < 9 ? 5 : 2))}
                 />
               </Box>
               <Text dimColor>
