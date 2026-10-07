@@ -1,0 +1,7 @@
+{
+  "name": "dbt-runs",
+  "version": "0.1.0",
+  "description": "Side pane that records every dbt command Claude runs: live output, history, cleanup",
+  "author": { "name": "Matt Romano" },
+  "types": "./types/index.d.ts"
+}

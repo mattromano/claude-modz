@@ -1,0 +1,11 @@
+{
+  "name": "claude-modz",
+  "owner": { "name": "Matt Romano" },
+  "plugins": [
+    {
+      "name": "dbt-runs",
+      "source": "./dbt-runs",
+      "description": "Side pane that records every dbt command Claude runs: live output, history, cleanup"
+    }
+  ]
+}
