@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Fake dbt for demoing the dbt-runs pane without a warehouse.
+#   FAKE_DBT_SCENARIO=success|warn|error  (default success)
+#   FAKE_DBT_DELAY=<seconds per model>     (default 1)
+#   dbt <run|build|test|...> [-s|-m model ...]
+set -u
+sub=${1:-run}; shift || true
+scenario=${FAKE_DBT_SCENARIO:-success}
+delay=${FAKE_DBT_DELAY:-1}
+
+models=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    -s|-m|--select|--models) shift; while [ $# -gt 0 ] && [[ $1 != -* ]]; do models+=("${1#+}"); shift; done ;;
+    *) shift ;;
+  esac
+done
+[ ${#models[@]} -eq 0 ] && models=(silver__blocks silver__transactions silver__logs silver__traces core__fact_event_logs core__ez_native_transfers)
+
+ts() { date +%H:%M:%S; }
+say() { echo "$(ts)  $*"; }
+dots() { local s="$1"; local n=$((60 - ${#s})); [ $n -lt 3 ] && n=3; printf '%s %s' "$s" "$(printf '.%.0s' $(seq 1 $n))"; }
+
+total=${#models[@]}
+say "Running with dbt=1.9.4"
+sleep 0.4; say "Registered adapter: snowflake=1.9.0"
+sleep 0.6; say "Found 1024 models, 2310 data tests, 412 sources, 1180 macros"
+say ""; say "Concurrency: 8 threads (target='dev')"; say ""
+
+pass=0 warn=0 err=0 skip=0 start=$(date +%s)
+for i in "${!models[@]}"; do
+  n=$((i + 1)); m=${models[$i]}; schema=${m%%__*}; name=${m#*__}
+  if [ "$sub" = test ]; then
+    say "$(dots "$n of $total START test not_null_${name}_block_number") [RUN]"
+  else
+    say "$(dots "$n of $total START sql incremental model ${schema}.${name}") [RUN]"
+  fi
+  sleep "$delay"
+  secs="$(( RANDOM % 9 + 1 )).$(( RANDOM % 90 + 10 ))s"
+  if [ "$scenario" = error ] && [ $n -eq $(( (total + 1) / 2 )) ]; then
+    say "$(dots "$n of $total ERROR creating sql incremental model ${schema}.${name}") [ERROR in $secs]"; err=$((err + 1))
+  elif [ "$scenario" = warn ] && [ $n -eq $total ]; then
+    say "$(dots "$n of $total WARN 3 test unique_${name}_tx_hash") [WARN 3 in $secs]"; warn=$((warn + 1))
+  elif [ "$scenario" = error ] && [ $n -gt $(( (total + 1) / 2 )) ]; then
+    say "$(dots "$n of $total SKIP relation ${schema}.${name} due to ephemeral model error") [SKIP]"; skip=$((skip + 1))
+  elif [ "$sub" = test ]; then
+    say "$(dots "$n of $total PASS not_null_${name}_block_number") [PASS in $secs]"; pass=$((pass + 1))
+  else
+    say "$(dots "$n of $total OK created sql incremental model ${schema}.${name}") [SUCCESS $((RANDOM * 7)) in $secs]"; pass=$((pass + 1))
+  fi
+done
+
+el=$(( $(date +%s) - start ))
+say ""; say "Finished running $total incremental models in 0 hours 0 minutes and ${el}.00 seconds (${el}.00s)."; say ""
+if [ $err -gt 0 ]; then
+  say "Completed with $err error, 0 partial successes, and $warn warnings:"; say ""
+  say "Database Error in model ${models[$(( (total - 1) / 2 ))]} (models/silver/core/${models[$(( (total - 1) / 2 ))]}.sql)"
+  say "  100038 (22018): Numeric value '0x' is not recognized"
+  say "  compiled code at target/run/ethereum_models/models/silver/${models[$(( (total - 1) / 2 ))]}.sql"
+elif [ $warn -gt 0 ]; then
+  say "Completed with $warn warning:"; say ""; say "Warning in test unique_tx_hash: Got 3 results, configured to warn if != 0"
+else
+  say "Completed successfully"
+fi
+say ""; say "Done. PASS=$pass WARN=$warn ERROR=$err SKIP=$skip NO-OP=0 TOTAL=$total"
+[ $err -gt 0 ] && exit 1 || exit 0
