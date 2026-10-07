@@ -17,6 +17,12 @@ while [ $# -gt 0 ]; do
 done
 [ ${#models[@]} -eq 0 ] && models=(silver__blocks silver__transactions silver__logs silver__traces core__fact_event_logs core__ez_native_transfers)
 
+# Like dbt: colors on a terminal, or anywhere DBT_USE_COLORS=true.
+if [ -t 1 ] || [ "${DBT_USE_COLORS:-}" = true ]; then
+  G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' N=$'\e[0m'
+else
+  G= R= Y= N=
+fi
 ts() { date +%H:%M:%S; }
 say() { echo "$(ts)  $*"; }
 dots() { local s="$1"; local n=$((60 - ${#s})); [ $n -lt 3 ] && n=3; printf '%s %s' "$s" "$(printf '.%.0s' $(seq 1 $n))"; }
@@ -38,29 +44,29 @@ for i in "${!models[@]}"; do
   sleep "$delay"
   secs="$(( RANDOM % 9 + 1 )).$(( RANDOM % 90 + 10 ))s"
   if [ "$scenario" = error ] && [ $n -eq $(( (total + 1) / 2 )) ]; then
-    say "$(dots "$n of $total ERROR creating sql incremental model ${schema}.${name}") [ERROR in $secs]"; err=$((err + 1))
+    say "$(dots "$n of $total ERROR creating sql incremental model ${schema}.${name}") [${R}ERROR${N} in $secs]"; err=$((err + 1))
   elif [ "$scenario" = warn ] && [ $n -eq $total ]; then
-    say "$(dots "$n of $total WARN 3 test unique_${name}_tx_hash") [WARN 3 in $secs]"; warn=$((warn + 1))
+    say "$(dots "$n of $total WARN 3 test unique_${name}_tx_hash") [${Y}WARN 3${N} in $secs]"; warn=$((warn + 1))
   elif [ "$scenario" = error ] && [ $n -gt $(( (total + 1) / 2 )) ]; then
-    say "$(dots "$n of $total SKIP relation ${schema}.${name} due to ephemeral model error") [SKIP]"; skip=$((skip + 1))
+    say "$(dots "$n of $total SKIP relation ${schema}.${name} due to ephemeral model error") [${Y}SKIP${N}]"; skip=$((skip + 1))
   elif [ "$sub" = test ]; then
-    say "$(dots "$n of $total PASS not_null_${name}_block_number") [PASS in $secs]"; pass=$((pass + 1))
+    say "$(dots "$n of $total PASS not_null_${name}_block_number") [${G}PASS${N} in $secs]"; pass=$((pass + 1))
   else
-    say "$(dots "$n of $total OK created sql incremental model ${schema}.${name}") [SUCCESS $((RANDOM * 7)) in $secs]"; pass=$((pass + 1))
+    say "$(dots "$n of $total OK created sql incremental model ${schema}.${name}") [${G}SUCCESS $((RANDOM * 7))${N} in $secs]"; pass=$((pass + 1))
   fi
 done
 
 el=$(( $(date +%s) - start ))
 say ""; say "Finished running $total incremental models in 0 hours 0 minutes and ${el}.00 seconds (${el}.00s)."; say ""
 if [ $err -gt 0 ]; then
-  say "Completed with $err error, 0 partial successes, and $warn warnings:"; say ""
-  say "Database Error in model ${models[$(( (total - 1) / 2 ))]} (models/silver/core/${models[$(( (total - 1) / 2 ))]}.sql)"
+  say "${R}Completed with $err error, 0 partial successes, and $warn warnings:${N}"; say ""
+  say "${R}Database Error in model ${models[$(( (total - 1) / 2 ))]} (models/silver/core/${models[$(( (total - 1) / 2 ))]}.sql)${N}"
   say "  100038 (22018): Numeric value '0x' is not recognized"
   say "  compiled code at target/run/ethereum_models/models/silver/${models[$(( (total - 1) / 2 ))]}.sql"
 elif [ $warn -gt 0 ]; then
-  say "Completed with $warn warning:"; say ""; say "Warning in test unique_tx_hash: Got 3 results, configured to warn if != 0"
+  say "${Y}Completed with $warn warning:${N}"; say ""; say "${Y}Warning in test unique_tx_hash: Got 3 results, configured to warn if != 0${N}"
 else
-  say "Completed successfully"
+  say "${G}Completed successfully${N}"
 fi
 say ""; say "Done. PASS=$pass WARN=$warn ERROR=$err SKIP=$skip NO-OP=0 TOTAL=$total"
 [ $err -gt 0 ] && exit 1 || exit 0

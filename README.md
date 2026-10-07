@@ -11,7 +11,7 @@ A band above the prompt that records every dbt command Claude runs through Bash.
 - **Captures** the standard dbt console output (what you'd see in your terminal, not `logs/dbt.log`) for `run`, `build`, `test`, `seed`, `snapshot`, `compile`, `show`, `ls`, `retry`, `clone`, `run-operation`. Housekeeping (`deps`, `clean`, `debug`) is ignored.
 - **Live**: output is tee'd to a log file as it streams, so backgrounded and long-running jobs are tracked too. The band tails the run while it's going.
 - **History** across all sessions: start time, repo, command, status (✓ / ⚠ / ✗), duration, `PASS/WARN/ERROR/SKIP` counts, size on disk.
-- **Open** any run (click in fullscreen, or `ctrl+x tab` then ↑↓ + Enter) for its summary and full output, opened at the end; scroll it with the mouse wheel or trackpad.
+- **Open** any run (click in fullscreen, or `ctrl+x tab` then ↑↓ + Enter) for its summary and full output in dbt's own colors, opened at the end; scroll it with the mouse wheel or trackpad.
 - **Clean up**: delete a run, `Clear finished`, or `Clear >7d`.
 - **Minimize** (`m`) hides the band; runs stay stored. `/dbt-runs` or the next dbt run brings it back.
 
@@ -26,8 +26,8 @@ Logs live in `~/.claude/claude-modz/dbt-runs/`; the run index lives in the plugi
 The band also appears on its own when a dbt run starts.
 
 **How capture works**: a dbt command is rewritten to
-`{ ( <cmd> ) ; echo $? > <run>.rc ; } 2>&1 | tee <run>.log ; ( exit "$(cat <run>.rc)" )`,
-so Claude sees the same output and the same exit code. One side effect: a `cd` inside a dbt command no longer persists to the next Bash call.
+`{ ( export DBT_USE_COLORS=true; <cmd> ) ; echo $? > <run>.rc ; } 2>&1 | tee <run>.log | perl -pe '<strip colors>' ; ( exit "$(cat <run>.rc)" )`.
+The log keeps dbt's colors for the band; Claude sees the same output with the color codes stripped, and the same exit code. One side effect: a `cd` inside a dbt command no longer persists to the next Bash call.
 
 ## Install
 

@@ -1,7 +1,7 @@
 import type { RenderElement } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { deriveStatus, isDbtCommand, logWindow, parseSummary, repoFromCommand, wrapCommand } from './dbt'
+import { deriveStatus, isDbtCommand, logWindow, parseAnsiLine, parseSummary, repoFromCommand, wrapCommand } from './dbt'
 
 describe('detection', () => {
   test('records dbt work commands', async () => {
@@ -59,6 +59,29 @@ const BAND = {
   },
 } as const
 
+describe('colors', () => {
+  test('SGR escapes become styled spans', async () => {
+    const line = '1 of 2 OK created model x ... [\u001b[32mSUCCESS 1\u001b[0m in 2.0s]'
+    expect(parseAnsiLine(line)).toEqual([
+      { text: '1 of 2 OK created model x ... [' },
+      { text: 'SUCCESS 1', color: 'success' },
+      { text: ' in 2.0s]' },
+    ])
+    expect(parseAnsiLine('\u001b[1;31mERROR\u001b[22m!\u001b[39m ok')).toEqual([
+      { text: 'ERROR', color: 'error', bold: true },
+      { text: '!', color: 'error', bold: false, dimColor: false },
+      { text: ' ok', bold: false, dimColor: false },
+    ])
+    expect(parseAnsiLine('plain')).toEqual([{ text: 'plain' }])
+  })
+
+  test('the wrapper turns dbt colors on and strips them from what Claude reads', async () => {
+    const wrapped = wrapCommand('dbt run', '/l.log', '/l.rc')
+    expect(wrapped).toContain('export DBT_USE_COLORS=true')
+    expect(wrapped).toContain("| tee '/l.log' | perl -pe")
+  })
+})
+
 describe('log window', () => {
   const log = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
 
@@ -105,7 +128,10 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   on('tool.call', { tool: 'Bash' }, (_$, e) => {
     ranCommand = e.command
     const log = e.command.match(/tee '([^']+)'/)?.[1] ?? ''
-    const models = Array.from({ length: 40 }, (_, i) => `${i + 1} of 40 OK created model m${i + 1}`).join('\n')
+    const models = Array.from(
+      { length: 40 },
+      (_, i) => `${i + 1} of 40 OK created model m${i + 1} [\u001b[32mSUCCESS ${i + 1}\u001b[0m in 1.0s]`,
+    ).join('\n')
     const out = `Running with dbt=1.9\n${models}\nDone. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4\n`
     files.set(log, out)
     files.set(log.replace(/\.log$/, '.rc'), '0\n')
@@ -141,7 +167,11 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   expect(await detail.find({ text: /PASS=4/ })).toBeDefined()
   // The whole log is drawn for the band to scroll with the wheel. (Opening at the end is
   // $.ui.scroll, which the test kit does not answer.)
-  expect(await detail.find({ type: 'Code', text: /Running with dbt=1.9[\s\S]*Done\. PASS=4/ })).toBeDefined()
+  expect(await detail.find({ type: 'Text', text: /^Running with dbt=1.9$/ })).toBeDefined()
+  expect(await detail.find({ type: 'Text', text: /^Done\. PASS=4/ })).toBeDefined()
+  // dbt's colors come through as styled text, escapes gone.
+  expect(await detail.find({ type: 'Text', text: /^SUCCESS 40$/ })).toBeDefined()
+  expect(await detail.find({ text: /\u001b/ })).toBeUndefined()
   expect(await detail.find({ key: 'log-end' })).toBeDefined()
   await detail.press({ key: 'back' })
   expect(await detail.find({ text: /dbt runs · 1 ·/ })).toBeDefined()

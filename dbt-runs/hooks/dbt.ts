@@ -12,13 +12,20 @@ export const isDbtCommand = (command: string): boolean =>
 
 const quote = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`
 
+// Strips terminal escapes from each line as it streams, flushing every line.
+const STRIP_ANSI = `perl -pe 'BEGIN { $| = 1 } s/\\e\\[[0-9;?]*[A-Za-z]//g'`
+
 /**
- * Copies the command's combined output into `logPath` while passing it through
- * unchanged, records the real exit code in `rcPath`, and leaves that code as the
- * command's status (a pipe would otherwise report tee's). Works in bash and zsh.
+ * Copies the command's combined output into `logPath`, records the real exit code in
+ * `rcPath`, and leaves that code as the command's status (a pipe would otherwise report
+ * the last stage's). Works in bash and zsh.
+ *
+ * dbt colors only a terminal, so the command runs with DBT_USE_COLORS=true: the log
+ * keeps dbt's colors for the band, and the copy Claude reads has them stripped, line
+ * by line as it streams.
  */
 export const wrapCommand = (command: string, logPath: string, rcPath: string): string =>
-  `{ (\n${command}\n) ; echo $? > ${quote(rcPath)} ; } 2>&1 | tee ${quote(logPath)} ; ( exit "$(cat ${quote(rcPath)} 2>/dev/null || echo 1)" )`
+  `{ (\nexport DBT_USE_COLORS=true\n${command}\n) ; echo $? > ${quote(rcPath)} ; } 2>&1 | tee ${quote(logPath)} | ${STRIP_ANSI} ; ( exit "$(cat ${quote(rcPath)} 2>/dev/null || echo 1)" )`
 
 export const basename = (path: string): string =>
   path.replace(/\/+$/, '').split('/').pop() || path
@@ -50,6 +57,40 @@ export const deriveStatus = (
   if (exitCode !== 0 || (counts?.error ?? 0) > 0) return 'error'
   if ((counts?.warn ?? 0) > 0) return 'warn'
   return 'success'
+}
+
+export type AnsiSpan = { text: string; color?: string; bold?: boolean; dimColor?: boolean }
+
+// SGR foreground codes to the session theme's colors where it has one, else the terminal's names.
+const ANSI_COLOR: Record<number, string> = {
+  30: 'black', 31: 'error', 32: 'success', 33: 'warning', 34: 'blue', 35: 'magenta', 36: 'cyan', 37: 'white',
+  90: 'gray', 91: 'redBright', 92: 'greenBright', 93: 'yellowBright', 94: 'blueBright', 95: 'magentaBright',
+  96: 'cyanBright', 97: 'whiteBright',
+}
+
+/** One line's text split where its SGR escapes change the style; other escapes are dropped. */
+export const parseAnsiLine = (line: string): AnsiSpan[] => {
+  const spans: AnsiSpan[] = []
+  let style: Omit<AnsiSpan, 'text'> = {}
+  let at = 0
+  const push = (text: string) => {
+    if (text.length > 0) spans.push({ text, ...style })
+  }
+  for (const m of line.matchAll(/\u001b\[([0-9;?]*)([A-Za-z])/g)) {
+    push(line.slice(at, m.index))
+    at = m.index + m[0].length
+    if (m[2] !== 'm') continue
+    for (const code of (m[1] || '0').split(';').map(Number)) {
+      if (code === 0) style = {}
+      else if (code === 1) style = { ...style, bold: true }
+      else if (code === 2) style = { ...style, dimColor: true }
+      else if (code === 22) style = { ...style, bold: false, dimColor: false }
+      else if (code === 39) style = { ...style, color: undefined }
+      else if (ANSI_COLOR[code] !== undefined) style = { ...style, color: ANSI_COLOR[code] }
+    }
+  }
+  push(line.slice(at))
+  return spans
 }
 
 export const stripAnsi = (text: string): string =>

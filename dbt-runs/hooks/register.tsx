@@ -11,6 +11,7 @@ import {
   isDbtCommand,
   logWindow,
   newRunId,
+  parseAnsiLine,
   parseSummary,
   repoFromCommand,
   stripAnsi,
@@ -29,7 +30,7 @@ const view = atom({ plugin: 'dbt-runs', key: 'view' } as const, { kind: 'list' }
 // Whether the band above the prompt shows; runs are kept either way.
 const isShown = atom({ plugin: 'dbt-runs', key: 'isShown' } as const, false)
 // The band scrolls a tall tree with the wheel itself; past this many lines the head is left out.
-const LOG_MAX_LINES = 2000
+const LOG_MAX_LINES = 1000
 const LOG_END_KEY = 'log-end'
 
 const GLYPH: Record<DbtRunStatus, { glyph: string; color: string }> = {
@@ -212,7 +213,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || !(await read($, isShown))) return next(e)
 
-    const { Box, Text, Button, Code } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const width = Math.max(20, e.props.bodyColumns)
     const list = await read($, runs)
     const current = await read($, view)
@@ -232,7 +233,8 @@ export const register: Register = on => {
     if (detail !== undefined) {
       const { glyph, color } = GLYPH[detail.status]
       const elapsed = (detail.finishedAt ?? now) - detail.startedAt
-      const log = stripAnsi((await readText($, detail.logPath)) ?? '')
+      // The log keeps dbt's colors; lone carriage returns (progress redraws) become line breaks.
+      const log = ((await readText($, detail.logPath)) ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
       const c = detail.counts
       const win = logWindow(log, LOG_MAX_LINES, 0)
       return (
@@ -275,7 +277,23 @@ export const register: Register = on => {
           </Text>
           {hint(`scroll for more · b back${detail.status === 'running' ? '' : ' · d delete'} · m minimize`)}
           {win.first > 1 && <Text dimColor>… first {win.first - 1} lines left out (full log: {detail.logPath})</Text>}
-          <Code source={log.length === 0 ? '(no output yet)' : win.source} />
+          {log.length === 0 && <Text dimColor>(no output yet)</Text>}
+          {log.length > 0 &&
+            win.source.split('\n').map(line => (
+              <Text>
+                {line.length === 0
+                  ? ' '
+                  : parseAnsiLine(line).map(span => (
+                      <Text
+                        {...(span.color !== undefined ? { color: span.color } : {})}
+                        {...(span.bold ? { bold: true } : {})}
+                        {...(span.dimColor ? { dimColor: true } : {})}
+                      >
+                        {span.text}
+                      </Text>
+                    ))}
+              </Text>
+            ))}
           <Box key={LOG_END_KEY}>
             <Text dimColor>
               {detail.status === 'running' ? '● still running…' : `— end of output · ${win.total} lines —`}
