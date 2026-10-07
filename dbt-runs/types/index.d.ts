@@ -21,6 +21,6 @@ export type DbtRunsView = { kind: 'list' } | { kind: 'detail'; id: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'dbt-runs': { runs: DbtRun[]; view: DbtRunsView; isShown: boolean }
+    'dbt-runs': { runs: DbtRun[]; view: DbtRunsView; isShown: boolean; logEnd: number }
   }
 }

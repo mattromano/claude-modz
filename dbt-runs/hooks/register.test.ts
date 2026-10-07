@@ -1,7 +1,7 @@
 import type { RenderElement } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { deriveStatus, isDbtCommand, parseSummary, repoFromCommand, wrapCommand } from './dbt'
+import { deriveStatus, isDbtCommand, logWindow, parseSummary, repoFromCommand, wrapCommand } from './dbt'
 
 describe('detection', () => {
   test('records dbt work commands', async () => {
@@ -59,6 +59,27 @@ const BAND = {
   },
 } as const
 
+describe('log window', () => {
+  const log = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
+
+  test('0 follows the end', async () => {
+    const w = logWindow(log, 10, 0)
+    expect([w.first, w.last, w.total, w.isAtEnd, w.isAtTop]).toEqual([21, 30, 30, true, false])
+    expect(w.source.split('\n')[0]).toBe('line 21')
+  })
+
+  test('a fixed end stays put as the log grows', async () => {
+    const grown = log + 'line 31\nline 32\n'
+    expect(logWindow(grown, 10, 15).last).toBe(15)
+  })
+
+  test('clamps to the top and to the end', async () => {
+    expect(logWindow(log, 10, 3)).toMatchObject({ first: 1, last: 10, isAtTop: true })
+    expect(logWindow(log, 10, 99)).toMatchObject({ last: 30, isAtEnd: true })
+    expect(logWindow('one\ntwo', 10, 0)).toMatchObject({ first: 1, last: 2, isAtTop: true, isAtEnd: true })
+  })
+})
+
 test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on) => {
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
@@ -84,7 +105,8 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   on('tool.call', { tool: 'Bash' }, (_$, e) => {
     ranCommand = e.command
     const log = e.command.match(/tee '([^']+)'/)?.[1] ?? ''
-    const out = 'Running with dbt=1.9\nDone. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4\n'
+    const models = Array.from({ length: 40 }, (_, i) => `${i + 1} of 40 OK created model m${i + 1}`).join('\n')
+    const out = `Running with dbt=1.9\n${models}\nDone. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4\n`
     files.set(log, out)
     files.set(log.replace(/\.log$/, '.rc'), '0\n')
     return { result: { stdout: out, stderr: '', interrupted: false } }
@@ -117,7 +139,19 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   const row = (await detail.findAll({ type: 'Button' })).find(b => b.key?.startsWith('open-'))
   await detail.press({ key: row!.key! })
   expect(await detail.find({ text: /PASS=4/ })).toBeDefined()
+  // 42 log lines, 14 shown (maxRows 20 less 6): starts at the end, pages back, returns.
+  const position = async () => (await detail.find({ text: /lines \d+–\d+ of \d+/ }))?.text ?? ''
+  expect(await position()).toContain('lines 29–42 of 42')
+  expect(await detail.find({ type: 'Code', text: /Done\. PASS=4/ })).toBeDefined()
+  await detail.press({ key: 'older' })
+  expect(await position()).toContain('lines 16–29 of 42')
+  await detail.press({ key: 'top' })
+  expect(await position()).toContain('lines 1–14 of 42')
   expect(await detail.find({ type: 'Code', text: /Running with dbt=1.9/ })).toBeDefined()
+  await detail.press({ key: 'newer' })
+  expect(await position()).toContain('lines 14–27 of 42')
+  await detail.press({ key: 'end' })
+  expect(await position()).toContain('lines 29–42 of 42')
   await detail.press({ key: 'back' })
   expect(await detail.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
   await detail.unmount()

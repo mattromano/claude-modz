@@ -11,7 +11,7 @@ A band above the prompt that records every dbt command Claude runs through Bash.
 - **Captures** the standard dbt console output (what you'd see in your terminal, not `logs/dbt.log`) for `run`, `build`, `test`, `seed`, `snapshot`, `compile`, `show`, `ls`, `retry`, `clone`, `run-operation`. Housekeeping (`deps`, `clean`, `debug`) is ignored.
 - **Live**: output is tee'd to a log file as it streams, so backgrounded and long-running jobs are tracked too. The band tails the run while it's going.
 - **History** across all sessions: start time, repo, command, status (✓ / ⚠ / ✗), duration, `PASS/WARN/ERROR/SKIP` counts, size on disk.
-- **Open** any run (click in fullscreen, or `ctrl+x tab` then ↑↓ + Enter) for its summary and the last 500 lines of output.
+- **Open** any run (click in fullscreen, or `ctrl+x tab` then ↑↓ + Enter) for its summary and output: `k`/`j` page older/newer, `t`/`e` jump to top/end (it follows the end of a live run).
 - **Clean up**: delete a run, `Clear finished`, or `Clear >7d`.
 - **Minimize** (`m`) hides the band; runs stay stored. `/dbt-runs` or the next dbt run brings it back.
 

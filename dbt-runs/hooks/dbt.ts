@@ -55,8 +55,24 @@ export const deriveStatus = (
 export const stripAnsi = (text: string): string =>
   text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r(?!\n)/g, '\n')
 
-export const tailLines = (text: string, count: number): string =>
-  text.replace(/\n+$/, '').split('\n').slice(-Math.max(1, count)).join('\n')
+/**
+ * The `size` lines of a log ending at line `end` (1-based), or at its last line while `end` is 0,
+ * which is how a live run is followed. A fixed `end` stays put as a running log grows.
+ */
+export const logWindow = (text: string, size: number, end: number) => {
+  const all = text.replace(/\n+$/, '').split('\n')
+  const rows = Math.max(1, size)
+  const last = end <= 0 ? all.length : Math.min(Math.max(end, Math.min(rows, all.length)), all.length)
+  const first = Math.max(1, last - rows + 1)
+  return {
+    source: all.slice(first - 1, last).join('\n'),
+    first,
+    last,
+    total: all.length,
+    isAtTop: first === 1,
+    isAtEnd: last === all.length,
+  }
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 

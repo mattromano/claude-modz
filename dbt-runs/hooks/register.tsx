@@ -9,11 +9,11 @@ import {
   formatDuration,
   formatTime,
   isDbtCommand,
+  logWindow,
   newRunId,
   parseSummary,
   repoFromCommand,
   stripAnsi,
-  tailLines,
   truncate,
   wrapCommand,
 } from './dbt'
@@ -28,6 +28,8 @@ const runs = atom({ plugin: 'dbt-runs', key: 'runs' } as const, [] as DbtRun[])
 const view = atom({ plugin: 'dbt-runs', key: 'view' } as const, { kind: 'list' } as DbtRunsView)
 // Whether the band above the prompt shows; runs are kept either way.
 const isShown = atom({ plugin: 'dbt-runs', key: 'isShown' } as const, false)
+// The line the run view's window ends on; 0 follows the log's end.
+const logEnd = atom({ plugin: 'dbt-runs', key: 'logEnd' } as const, 0)
 
 const GLYPH: Record<DbtRunStatus, { glyph: string; color: string }> = {
   running: { glyph: '●', color: 'warning' },
@@ -214,7 +216,11 @@ export const register: Register = on => {
     const list = await read($, runs)
     const current = await read($, view)
     const now = await $.clock.now()
-    const setView = (v: DbtRunsView) => () => void update($, view, () => v)
+    const setView = (v: DbtRunsView) => () =>
+      void (async () => {
+        await update($, logEnd, () => 0)
+        await update($, view, () => v)
+      })()
     // Letter hotkeys only: a band's digit hotkeys would answer digits typed into an empty prompt.
     const hint = (keys: string) => <Text dimColor>ctrl+x tab to focus · {keys}</Text>
 
@@ -224,6 +230,13 @@ export const register: Register = on => {
       const elapsed = (detail.finishedAt ?? now) - detail.startedAt
       const log = stripAnsi((await readText($, detail.logPath)) ?? '')
       const c = detail.counts
+      // Header, counts, command, position row and hint take six rows; the log gets the rest.
+      const rows = Math.max(6, e.props.maxRows - 6)
+      const win = logWindow(log, rows, await read($, logEnd))
+      const page = Math.max(1, rows - 1)
+      // Moving back onto the last line returns to following the end.
+      const moveTo = (last: number) => () =>
+        void update($, logEnd, () => (last >= win.total ? 0 : Math.max(Math.min(rows, win.total), last)))
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
@@ -262,10 +275,36 @@ export const register: Register = on => {
           <Text dimColor wrap="truncate-end">
             $ {detail.command.replace(/\s+/g, ' ')}
           </Text>
-          <Code
-            source={log.length > 0 ? tailLines(log, Math.max(8, e.props.maxRows - 5)) : '(no output yet)'}
-          />
-          {hint(detail.status === 'running' ? 'b back · m minimize' : 'b back · d delete · m minimize')}
+          {log.length === 0 ? <Code source="(no output yet)" /> : <Code source={win.source} />}
+          <Box flexDirection="row" gap={1}>
+            <Text dimColor>
+              lines {win.first}–{win.last} of {win.total}
+              {win.isAtEnd && detail.status === 'running' ? ' · following' : ''}
+            </Text>
+            {!win.isAtTop && (
+              <Button key="older" hotkey="k" dimColor onPress={moveTo(win.last - page)}>
+                ↑ older
+              </Button>
+            )}
+            {!win.isAtEnd && (
+              <Button key="newer" hotkey="j" dimColor onPress={moveTo(win.last + page)}>
+                ↓ newer
+              </Button>
+            )}
+            {!win.isAtTop && (
+              <Button key="top" hotkey="t" dimColor onPress={moveTo(rows)}>
+                top
+              </Button>
+            )}
+            {!win.isAtEnd && (
+              <Button key="end" hotkey="e" dimColor onPress={moveTo(win.total)}>
+                end
+              </Button>
+            )}
+          </Box>
+          {hint(
+            `k/j older/newer · t/e top/end · b back${detail.status === 'running' ? '' : ' · d delete'} · m minimize`,
+          )}
         </Box>
       )
     }
