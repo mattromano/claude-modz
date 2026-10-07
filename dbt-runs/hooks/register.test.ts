@@ -66,6 +66,7 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   const files = new Map<string, string>()
   const removed: string[] = []
   let ranCommand = ''
+  const opened: string[] = []
 
   on('process.run', (_$, e) => {
     if (e.argv[0] === 'rm') removed.push(...e.argv.slice(2))
@@ -95,7 +96,10 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/r/fallback' }))
   on('ui.panes', () => ({ value: [] }))
-  on('ui.open', () => ({ value: { isPlaced: true as const } }))
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true as const } }
+  })
 
   await $.session.start({ cwd: '/r', surface: null } as never)
   const ran = await $.tool.call({ tool: 'Bash', command: 'cd /r/ethereum-models && ./dbt-env/bin/dbt run -m x' })
@@ -103,6 +107,7 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   expect(ranCommand).toContain("tee '/home/t/.claude/claude-modz/dbt-runs/")
   expect(ranCommand).toContain('./dbt-env/bin/dbt run -m x')
   expect(ran.deny).toBeUndefined()
+  expect(opened).toEqual(['dbt-runs'])
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'dbt-runs', surface, ...PANE })

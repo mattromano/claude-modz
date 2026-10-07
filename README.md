@@ -22,7 +22,7 @@ Logs live in `~/.claude/claude-modz/dbt-runs/`; the run index lives in the plugi
 | `/dbt-runs clear` | Delete every finished run |
 | `/dbt-runs clear-week` | Delete finished runs older than 7 days |
 
-The pane also opens on its own when a dbt run starts (on terminals ≥144 columns wide).
+The pane also opens on its own when a dbt run starts.
 
 **How capture works**: a dbt command is rewritten to
 `{ ( <cmd> ) ; echo $? > <run>.rc ; } 2>&1 | tee <run>.log ; ( exit "$(cat <run>.rc)" )`,

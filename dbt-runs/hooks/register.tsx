@@ -141,15 +141,6 @@ const clearFinished = async ($: $, olderThanMs?: number) => {
 // Opened by the person it takes the keys; opened by a run starting it only shows.
 const openPane = ($: $, focus?: true) => $.ui.open({ id: PANE, title: TITLE, ...(focus ? { focus } : {}) })
 
-// The main screen reports no clicks and opens panes inline, so a run only pops the
-// pane open unasked where the terminal docks it beside the transcript.
-// Kept in the store: the layout is fixed per session, and a run can start before the pane is ever drawn.
-const DOCKED_KEY = 'isDocked'
-const rememberLayout = async ($: $, isFullscreen: boolean | undefined) => {
-  if (isFullscreen === undefined) return
-  if ((await $.store.get(DOCKED_KEY)) !== isFullscreen) await $.store.set(DOCKED_KEY, isFullscreen)
-}
-
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -177,7 +168,6 @@ export const register: Register = on => {
     if (arg === 'clear-week') {
       return { text: `Deleted ${await clearFinished($, WEEK_MS)} dbt runs older than 7 days.` }
     }
-    await rememberLayout($, e.presentation.isFullscreen)
     await update($, view, (): DbtRunsView => ({ kind: 'list' }))
     await openPane($, true)
 
@@ -204,7 +194,7 @@ export const register: Register = on => {
     }
     await saveRun($, run)
     const panes = await $.ui.panes()
-    if ((await $.store.get(DOCKED_KEY)) === true && !panes.some(p => p.id === PANE)) void openPane($)
+    if (!panes.some(p => p.id === PANE)) void openPane($)
 
     const ran = await next({ ...e, command: wrapCommand(e.command, run.logPath, run.rcPath) })
     if (ran.deny !== undefined) {
@@ -218,7 +208,6 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    void rememberLayout($, e.viewport?.isFullscreen).catch(() => undefined)
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const width = Math.max(20, e.props.bodyColumns)
     const list = await read($, runs)
