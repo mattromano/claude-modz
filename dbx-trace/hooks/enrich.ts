@@ -2,13 +2,15 @@ import type { DbxEnrichment, DbxEvent, DbxHistoryRow, DbxMatch } from '../types'
 import { normalizeSql, sqlString } from './sql'
 
 // Marks the enrichment query so it never shows up as one of the session's own statements.
-export const ENRICH_MARK = 'dbx-trace enrichment'
+// The whole comment, so SQL that merely mentions these words is not mistaken for the mod's own read.
+export const ENRICH_MARK = '/* dbx-trace enrichment */'
 
 // Clock skew between this machine and the warehouse, plus queueing before start_time.
 const TEXT_SLACK_MS = 2 * 60 * 1000
 const WINDOW_SLACK_MS = 5 * 1000
-// Past this, an event that never matched is taken as never going to (history lag is minutes).
-const PENDING_MS = 15 * 60 * 1000
+// Past this, an event that never matched is taken as never going to.
+// system.query.history ran ~15 min behind on a live workspace; give rows an hour to land.
+const PENDING_MS = 60 * 60 * 1000
 
 export const emptyEnrichment = (): DbxEnrichment => ({ fetched_at: 0, rows: [], matches: {} })
 
@@ -41,7 +43,7 @@ export const buildQuery = (events: readonly DbxEvent[], user: string, now: numbe
   const to = Math.max(...live.map(e => endOf(e, now))) + TEXT_SLACK_MS
   const who = user.trim() === '' ? 'current_user()' : sqlString(user.trim())
   return [
-    `/* ${ENRICH_MARK} */`,
+    ENRICH_MARK,
     'SELECT statement_id, execution_status, total_duration_ms, read_bytes, produced_rows,',
     '       compute.warehouse_id AS warehouse_id, error_message, client_application,',
     '       unix_millis(start_time) AS start_ms, unix_millis(end_time) AS end_ms, statement_text',

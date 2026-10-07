@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
 import type { DbxEvent } from '../types'
-import { buildQuery, emptyEnrichment, matchRows, parseHistory } from './enrich'
+import { buildQuery, emptyEnrichment, matchRows, parseHistory, pendingEvents } from './enrich'
 import { classifyBash, latestPerId, resultFacts, splitMcpName } from './events'
 import { renderPage } from './html'
 import { queryLink, tableLink } from './links'
@@ -482,4 +482,21 @@ test('the trace stays at the project root when the shell has cd-ed elsewhere', a
 
   expect(h_.lines().map(l => l.tables_read)).toEqual([['rcm_dev.charges.t'], ['rcm_dev.charges.u']])
   expect([...h_.files.keys()].filter(k => !k.startsWith('/r/.claude/dbx-trace/'))).toEqual([])
+})
+
+test('lagging history: an unmatched action stays pending well past 15 minutes', async () => {
+  const end = Date.parse('2026-10-07T18:29:51Z')
+  const event = { id: 'q1', ts: '2026-10-07T18:29:24Z', ended_ts: '2026-10-07T18:29:51Z', session_id: 's', event_type: 'query', status: 'succeeded' } as DbxEvent
+  // system.query.history ran ~15 min behind on the work workspace (2026-10-07).
+  expect(pendingEvents([event], emptyEnrichment(), end + 30 * 60 * 1000)).toHaveLength(1)
+  expect(pendingEvents([event], emptyEnrichment(), end + 61 * 60 * 1000)).toHaveLength(0)
+})
+
+test('SQL that only mentions the enrichment marker words is still recorded', async ($, on) => {
+  const h_ = harness(on)
+  await $.session.start({ cwd: '/r', surface: null } as never)
+  await $.tool.call({ tool: TOOL, statement: "SELECT count(*) FROM system.query.history WHERE statement_text NOT LIKE '%dbx-trace enrichment%'" } as never)
+  expect(h_.lines()).toHaveLength(1)
+  await $.tool.call({ tool: TOOL, statement: '/* dbx-trace enrichment */ SELECT 1' } as never)
+  expect(h_.lines()).toHaveLength(1)
 })
