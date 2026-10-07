@@ -1,33 +1,12 @@
 # claude-modz
 
-Mods for [Claude Code](https://claude.com/claude-code): function-hook plugins that add panes, hooks and commands to the terminal UI.
+Mods for [Claude Code](https://claude.com/claude-code): plugins that add panes, bands and commands to the terminal UI.
 
 ## Mods
 
-### `dbt-runs`
-
-A band above the prompt that records every dbt command Claude runs through Bash. It sits at the bottom in both the default and fullscreen layouts.
-
-- **Captures** the standard dbt console output (what you'd see in your terminal, not `logs/dbt.log`) for `run`, `build`, `test`, `seed`, `snapshot`, `compile`, `show`, `ls`, `retry`, `clone`, `run-operation`. Housekeeping (`deps`, `clean`, `debug`) is ignored.
-- **Live**: output is tee'd to a log file as it streams, so backgrounded and long-running jobs are tracked too. The band tails the run while it's going.
-- **History** across all sessions: start time, repo, command, status (✓ / ⚠ / ✗), duration, `PASS/WARN/ERROR/SKIP` counts, size on disk.
-- **Open** any run (click in fullscreen, or `ctrl+x tab` then ↑↓ + Enter) for its summary and full output in dbt's own colors, opened at the end; scroll it with the mouse wheel or trackpad.
-- **Clean up**: delete a run, `Clear finished`, or `Clear >7d`.
-- **Minimize** (`m`) hides the band; runs stay stored. `/dbt-runs` or the next dbt run brings it back.
-
-Logs live in `~/.claude/claude-modz/dbt-runs/`; the run index lives in the plugin's store.
-
-| Command | Does |
+| Mod | What it does |
 | --- | --- |
-| `/dbt-runs` | Show the band |
-| `/dbt-runs clear` | Delete every finished run |
-| `/dbt-runs clear-week` | Delete finished runs older than 7 days |
-
-The band also appears on its own when a dbt run starts.
-
-**How capture works**: a dbt command is rewritten to
-`{ ( export DBT_USE_COLORS=true; <cmd> ) ; echo $? > <run>.rc ; } 2>&1 | tee <run>.log | perl -pe '<strip colors>' ; ( exit "$(cat <run>.rc)" )`.
-The log keeps dbt's colors for the band; Claude sees the same output with the color codes stripped, and the same exit code. One side effect: a `cd` inside a dbt command no longer persists to the next Bash call.
+| [`dbt-runs`](dbt-runs/README.md) | Watch every dbt command Claude runs, live, from a band above the prompt, with history, dbt's colors and cleanup |
 
 ## Install
 
@@ -39,8 +18,10 @@ Answer `y` to add the marketplace, then pick a scope (user is recommended).
 
 ## Develop
 
+Each mod is a folder with its own `.claude-plugin/plugin.json`, listed in `.claude-plugin/marketplace.json`.
+
 ```bash
-claude plugin validate dbt-runs
-claude plugin test dbt-runs
-claude --plugin-dir ./dbt-runs   # load from the working copy for one session
+claude plugin validate <mod>
+claude plugin test <mod>
+claude --plugin-dir ./<mod>   # load a working copy for one session
 ```

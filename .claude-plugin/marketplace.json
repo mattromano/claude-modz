@@ -5,7 +5,7 @@
     {
       "name": "dbt-runs",
       "source": "./dbt-runs",
-      "description": "Side pane that records every dbt command Claude runs: live output, history, cleanup"
+      "description": "Watch every dbt command Claude runs, live, from a band above the prompt: history, dbt colors, cleanup"
     }
   ]
 }
