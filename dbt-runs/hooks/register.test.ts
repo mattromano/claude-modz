@@ -106,7 +106,7 @@ describe('log window', () => {
 test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on) => {
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
-  mock.clock(on, { now: Date.UTC(2026, 9, 6, 12) })
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 6, 12) })
   const files = new Map<string, string>()
   const removed: string[] = []
   let ranCommand = ''
@@ -182,7 +182,10 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   await band.press({ key: 'minimize' })
   expect(await band.find({ text: /dbt runs/ })).toBeUndefined()
   await band.unmount()
-  await $.command.run({ command: 'dbt-runs', args: '' } as never)
+  // /dbt-runs clears the band for a moment before drawing it again (see reopen).
+  const reopening = $.command.run({ command: 'dbt-runs', args: '' } as never)
+  await clock.advance(200)
+  await reopening
   const reopened = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
   expect(await reopened.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
   await reopened.unmount()

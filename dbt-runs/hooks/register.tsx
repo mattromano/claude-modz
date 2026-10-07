@@ -141,6 +141,13 @@ const clearFinished = async ($: $, olderThanMs?: number) => {
 }
 
 const show = ($: $) => update($, isShown, () => true)
+// The person's collapse ([-], ctrl+x ctrl+a) belongs to the engine and no call expands it; clearing
+// the band for a moment before drawing it again is meant to bring it back open.
+const reopen = async ($: $) => {
+  await update($, isShown, () => false)
+  await $.clock.sleep(150)
+  await show($)
+}
 // Hides the band only: every run stays stored, and /dbt-runs or the next run brings it back.
 const minimize = ($: $) => () => void update($, isShown, () => false)
 
@@ -172,7 +179,7 @@ export const register: Register = on => {
       return { text: `Deleted ${await clearFinished($, WEEK_MS)} dbt runs older than 7 days.` }
     }
     await update($, view, (): DbtRunsView => ({ kind: 'list' }))
-    await show($)
+    await reopen($)
 
     return { text: 'dbt runs shown above the prompt.' }
   })
