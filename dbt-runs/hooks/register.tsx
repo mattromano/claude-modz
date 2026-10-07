@@ -141,6 +141,9 @@ const clearFinished = async ($: $, olderThanMs?: number) => {
 // Opened by the person it takes the keys; opened by a run starting it only shows.
 const openPane = ($: $, focus?: true) => $.ui.open({ id: PANE, title: TITLE, ...(focus ? { focus } : {}) })
 
+// Hides the pane only: every run stays stored, and /dbt-runs or the next run brings it back.
+const minimize = ($: $) => () => void $.ui.close({ id: PANE })
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -235,6 +238,9 @@ export const register: Register = on => {
                 Delete
               </Button>
             )}
+            <Button key="minimize" hotkey="m" dimColor onPress={minimize($)}>
+              Minimize
+            </Button>
           </Box>
           <Text>
             <Text color={color}>{glyph} </Text>
@@ -256,7 +262,7 @@ export const register: Register = on => {
               </Text>
             </Text>
           )}
-          {hint(detail.status === 'running' ? 'b back · Esc close' : 'b back · d delete · Esc close')}
+          {hint(detail.status === 'running' ? 'b back · m minimize' : 'b back · d delete · m minimize')}
           <Text dimColor wrap="wrap">
             $ {detail.command}
           </Text>
@@ -272,17 +278,22 @@ export const register: Register = on => {
           <Text bold>{list.length} runs</Text>
           <Text dimColor> · {formatBytes(totalBytes)} on disk</Text>
         </Text>
-        {list.length > 0 && (
-          <Box flexDirection="row" gap={1}>
+        <Box flexDirection="row" gap={1}>
+          {list.length > 0 && (
             <Button key="clear-finished" hotkey="c" dimColor onPress={() => void clearFinished($)}>
               Clear finished
             </Button>
+          )}
+          {list.length > 0 && (
             <Button key="clear-week" hotkey="w" dimColor onPress={() => void clearFinished($, WEEK_MS)}>
               Clear &gt;7d
             </Button>
-          </Box>
-        )}
-        {list.length > 0 && hint('1-9 open · ↑↓ move · Enter open · c clear finished · w clear >7d · Esc close')}
+          )}
+          <Button key="minimize" hotkey="m" dimColor onPress={minimize($)}>
+            Minimize
+          </Button>
+        </Box>
+        {list.length > 0 && hint('1-9 open · ↑↓ move · Enter open · c clear finished · w clear >7d · m minimize')}
         {list.length === 0 && <Text dimColor>No dbt runs yet. They appear here as Claude runs them.</Text>}
         {list.map((run, i) => {
           const { glyph, color } = GLYPH[run.status]

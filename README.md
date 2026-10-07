@@ -13,6 +13,7 @@ A side pane that records every dbt command Claude runs through Bash.
 - **History** across all sessions: start time, repo, command, status (✓ / ⚠ / ✗), duration, `PASS/WARN/ERROR/SKIP` counts, size on disk.
 - **Open** any run (click in fullscreen mode, or `1`–`9` / arrows + Enter) for its summary and the last 500 lines of output.
 - **Clean up**: delete a run, `Clear finished`, or `Clear >7d`.
+- **Minimize** (`m`) hides the pane; runs stay stored. `/dbt-runs` or the next dbt run brings it back.
 
 Logs live in `~/.claude/claude-modz/dbt-runs/`; the run index lives in the plugin's store.
 

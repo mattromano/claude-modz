@@ -93,6 +93,11 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
 
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const closed: string[] = []
+  on('ui.close', (_$, e) => {
+    closed.push(e.id)
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/r/fallback' }))
   on('ui.panes', () => ({ value: [] }))
@@ -126,6 +131,15 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   await detail.press({ key: 'back' })
   expect(await detail.find({ text: /1 runs/ })).toBeDefined()
   await detail.unmount()
+
+  // Minimize closes the pane but keeps the run.
+  const pane = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
+  await pane.press({ key: 'minimize' })
+  expect(closed).toEqual(['dbt-runs'])
+  await pane.unmount()
+  const reopened = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
+  expect(await reopened.find({ text: /1 runs/ })).toBeDefined()
+  await reopened.unmount()
 
   const done = await $.command.run({ command: 'dbt-runs', args: 'clear' } as never)
   expect(JSON.stringify(done)).toContain('Deleted 1')
