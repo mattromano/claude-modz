@@ -75,7 +75,7 @@ These were built against the test kit and could not be verified against a live w
 - [ ] **Async results**: if the MCP answers `PENDING` and needs a second poll tool, the row count may be missing from the trace (the history read still fills it in).
 - [ ] **System tables**: `SELECT * FROM system.query.history LIMIT 1` works for you. If not, the band and page show "query history unavailable: …" until the DW team grants SELECT.
 - [ ] **Columns**: the history read uses `statement_id, execution_status, total_duration_ms, read_bytes, produced_rows, compute.warehouse_id, error_message, client_application, start_time, end_time, statement_text, executed_by`.
-- [ ] **Latency**: how long until a statement appears in history? Unmatched actions are retried at each turn end for 15 minutes; `/dbx-trace refresh` forces a read.
+- [ ] **Latency**: how long until a statement appears in history? Unmatched actions are retried at each turn end for 60 minutes (history ran ~15 min behind on the work workspace); `/dbx-trace refresh` forces a read.
 - [ ] **Deep links** on the Azure workspace: Catalog Explorer `/explore/data/<c>/<s>/<t>`, query history `/sql/history?queryId=<id>`, warehouse `/sql/warehouses/<id>`. The patterns live in `hooks/links.ts`.
 
 ## How it works
