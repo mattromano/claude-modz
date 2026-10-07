@@ -1,0 +1,63 @@
+{
+  "name": "dbx-trace",
+  "version": "0.1.0",
+  "description": "Flight recorder for Databricks: every query, script and guardrail block Claude makes, in a band above the prompt and a per-session HTML trace with deep links",
+  "author": { "name": "Matt Romano" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "workspace_host": {
+      "type": "string",
+      "title": "Workspace URL",
+      "description": "Databricks workspace base URL for deep links, e.g. https://adb-1234567890123456.7.azuredatabricks.net",
+      "default": ""
+    },
+    "workspace_id": {
+      "type": "string",
+      "title": "Workspace ID",
+      "description": "Azure workspace ID; appended to links as ?o=<id>. Leave blank on AWS/GCP.",
+      "default": ""
+    },
+    "user_email": {
+      "type": "string",
+      "title": "Your Databricks identity",
+      "description": "Entra email that system.query.history records as executed_by. Blank uses current_user().",
+      "default": ""
+    },
+    "mcp_tool_pattern": {
+      "type": "string",
+      "title": "Databricks MCP tool pattern",
+      "description": "Regex over MCP tool names (mcp__<server>__<tool>) that run SQL",
+      "default": "^mcp__.*databricks.*__"
+    },
+    "sql_arg_names": {
+      "type": "string",
+      "title": "SQL argument names",
+      "description": "Comma-separated argument names that carry the SQL text on those tools",
+      "default": "statement,query,sql,sql_query"
+    },
+    "enrich_tool": {
+      "type": "string",
+      "title": "Enrichment tool",
+      "description": "Full MCP tool name used to read system.query.history; blank reuses the last Databricks SQL tool Claude called",
+      "default": ""
+    },
+    "prod_catalogs": {
+      "type": "string",
+      "title": "Prod catalogs",
+      "description": "Comma-separated catalogs drawn red (writes are flagged)",
+      "default": "rcm_prod"
+    },
+    "dev_catalogs": {
+      "type": "string",
+      "title": "Dev catalogs",
+      "description": "Comma-separated catalogs drawn green",
+      "default": "rcm_dev"
+    },
+    "enrich": {
+      "type": "boolean",
+      "title": "Enrich from query history",
+      "description": "Read system.query.history at the end of each turn for duration, bytes and rows",
+      "default": true
+    }
+  }
+}

@@ -1,2 +1,4 @@
 .DS_Store
 **/.claude-plugin/types/
+tools/fake-dbx/.state/
+__pycache__/
