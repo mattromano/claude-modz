@@ -4,6 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { DbtRun, DbtRunStatus, DbtRunsView } from '../types'
 import {
   basename,
+  dbtRcPathOf,
   deriveStatus,
   formatBytes,
   formatDuration,
@@ -87,7 +88,9 @@ const statOf = async ($: $, path: string) => {
 const finalize = async ($: $, run: DbtRun) => {
   const rc = await readText($, run.rcPath)
   if (rc === undefined) return false
-  const exitCode = Number.parseInt(rc.trim(), 10)
+  // dbt's own exit code where a call ran; the command's (a trailing grep, echo) otherwise.
+  const dbtRc = await readText($, dbtRcPathOf(run.rcPath))
+  const exitCode = Number.parseInt((dbtRc ?? rc).trim(), 10)
   const log = stripAnsi((await readText($, run.logPath)) ?? '')
   const counts = parseSummary(log)
   const logStat = await statOf($, run.logPath)
@@ -122,7 +125,7 @@ const deleteRuns = async ($: $, ids: readonly string[]) => {
   if (ids.length === 0) return
   const list = await read($, runs)
   const doomed = list.filter(r => ids.includes(r.id))
-  const paths = doomed.flatMap(r => [r.logPath, r.rcPath])
+  const paths = doomed.flatMap(r => [r.logPath, r.rcPath, dbtRcPathOf(r.rcPath), `${dbtRcPathOf(r.rcPath)}.step`])
   if (paths.length > 0) await $.process.run(['rm', '-f', ...paths])
   for (const run of doomed) await $.store.delete(STORE_PREFIX + run.id)
   await update($, runs, all => all.filter(r => !ids.includes(r.id)))

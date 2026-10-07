@@ -1,31 +1,113 @@
 import type { DbtRunCounts, DbtRunStatus } from '../types'
 
 // Subcommands worth recording; deps/clean/debug/init/parse are housekeeping.
-const DBT_COMMAND =
-  /(^|[\s;&|/(])dbt\s+(run|build|test|seed|snapshot|compile|show|source|ls|list|retry|clone|run-operation)(?=\s|$)/
+const SUBCOMMAND = '(?:run|build|test|seed|snapshot|compile|show|source|ls|list|retry|clone|run-operation)'
+
+// A dbt executable in command position: after a separator, a keyword or `VAR=value` prefixes.
+// Group 1 is everything before the executable, group 2 the executable (`dbt` or a path ending in it).
+const DBT_CALL = new RegExp(
+  String.raw`((?:^|[;&|({\n]|\b(?:then|do|else|time|exec)\s)[ \t]*(?:[A-Za-z_]\w*=\S*[ \t]+)*)` +
+    String.raw`((?:[^\s;&|()<>]*\/)?dbt)(?=[ \t]+${SUBCOMMAND}(?:[\s;&|)]|$))`,
+  'g',
+)
 
 // Marks a command this mod already wrapped, so a re-dispatch never double-wraps.
 export const WRAP_MARK = '.claude/claude-modz/dbt-runs/'
 
+// The shell function each dbt call is routed through.
+export const TEE_FN = '__dbt_runs_tee'
+
+/**
+ * The command with heredoc bodies and quoted strings blanked to spaces (newlines kept), so
+ * every offset still lines up with the original. Text written to a file or echoed is not a call.
+ */
+export const maskInert = (command: string): string => {
+  const out = command.split('')
+  const blank = (i: number) => {
+    if (out[i] !== '\n') out[i] = ' '
+  }
+  const heredocs: { word: string; tabs: boolean }[] = []
+  let i = 0
+  while (i < command.length) {
+    const c = command[i]
+    if (c === '\\') {
+      i += 2
+    } else if (c === "'" || c === '"') {
+      // Single quotes end at the next one; inside double quotes a backslash escapes.
+      let end = i + 1
+      while (end < command.length && command[end] !== c) end += c === '"' && command[end] === '\\' ? 2 : 1
+      const stop = Math.min(end + 1, command.length)
+      for (let j = i; j < stop; j++) blank(j)
+      i = stop
+    } else if (c === '<' && command.startsWith('<<', i) && command[i + 2] !== '<') {
+      const m = command.slice(i).match(/^<<(-?)[ \t]*(['"]?)([A-Za-z_][\w.-]*)\2/)
+      if (m === null) {
+        i += 2
+      } else {
+        heredocs.push({ word: m[3], tabs: m[1] === '-' })
+        i += m[0].length
+      }
+    } else if (c === '\n' && heredocs.length > 0) {
+      // Bodies start on the line after their `<<WORD`, one after another.
+      i += 1
+      for (const { word, tabs } of heredocs.splice(0)) {
+        while (i < command.length) {
+          const eol = command.indexOf('\n', i)
+          const end = eol === -1 ? command.length : eol
+          const line = command.slice(i, end)
+          for (let j = i; j < end; j++) blank(j)
+          i = end + 1
+          if ((tabs ? line.replace(/^\t+/, '') : line) === word) break
+        }
+      }
+    } else {
+      i += 1
+    }
+  }
+  return out.join('')
+}
+
+/** Offsets in `command` where a dbt executable to record starts. */
+export const dbtCallOffsets = (command: string): number[] =>
+  [...maskInert(command).matchAll(DBT_CALL)].map(m => m.index + m[1].length)
+
 export const isDbtCommand = (command: string): boolean =>
-  DBT_COMMAND.test(command) && !command.includes(WRAP_MARK)
+  !command.includes(WRAP_MARK) && dbtCallOffsets(command).length > 0
 
 const quote = (path: string) => `'${path.replace(/'/g, `'\\''`)}'`
 
 // Strips terminal escapes from each line as it streams, flushing every line.
 const STRIP_ANSI = `perl -pe 'BEGIN { $| = 1 } s/\\e\\[[0-9;?]*[A-Za-z]//g'`
 
+/** Where the wrapper records dbt's own exit code, beside the command's in `rcPath`. */
+export const dbtRcPathOf = (rcPath: string): string => rcPath.replace(/\.rc$/, '') + '.dbt.rc'
+
 /**
- * Copies the command's combined output into `logPath`, records the real exit code in
- * `rcPath`, and leaves that code as the command's status (a pipe would otherwise report
- * the last stage's). Works in bash and zsh.
+ * Routes each dbt call in `command` through a shell function that copies dbt's own output into
+ * `logPath` before anything else in the command (a redirect, `| tail`, `| grep`) can filter it.
+ * The function records the last failing dbt exit code (else 0) in the dbt rc file, and the
+ * command's own exit code goes to `rcPath` and stays the command's status. Works in bash and zsh.
  *
- * dbt colors only a terminal, so the command runs with DBT_USE_COLORS=true: the log
- * keeps dbt's colors for the band, and the copy Claude reads has them stripped, line
- * by line as it streams.
+ * dbt colors only a terminal, so each call runs with DBT_USE_COLORS=true: the log keeps
+ * dbt's colors for the band, and the copy the rest of the command sees has them stripped,
+ * line by line as it streams.
  */
-export const wrapCommand = (command: string, logPath: string, rcPath: string): string =>
-  `{ (\nexport DBT_USE_COLORS=true\n${command}\n) ; echo $? > ${quote(rcPath)} ; } 2>&1 | tee ${quote(logPath)} | ${STRIP_ANSI} ; ( exit "$(cat ${quote(rcPath)} 2>/dev/null || echo 1)" )`
+export const wrapCommand = (command: string, logPath: string, rcPath: string): string => {
+  const log = quote(logPath)
+  const rc = quote(rcPath)
+  const dbtRc = quote(dbtRcPathOf(rcPath))
+  const step = quote(dbtRcPathOf(rcPath) + '.step')
+  let routed = command
+  for (const at of dbtCallOffsets(command).reverse()) {
+    routed = `${routed.slice(0, at)}${TEE_FN} ${routed.slice(at)}`
+  }
+  const fn =
+    `${TEE_FN}() { { DBT_USE_COLORS=true "$@"; echo $? > ${step} ; } 2>&1 | tee -a ${log} | ${STRIP_ANSI} ; ` +
+    `__dbt_runs_last="$(cat ${step} 2>/dev/null || echo 1)" ; ` +
+    `[ "$__dbt_runs_last" = 0 ] && [ -e ${dbtRc} ] || echo "$__dbt_runs_last" > ${dbtRc} ; ` +
+    `return "$__dbt_runs_last" ; }`
+  return `: > ${log} ; { (\n${fn}\n${routed}\n) ; echo $? > ${rc} ; } ; ( exit "$(cat ${rc} 2>/dev/null || echo 1)" )`
+}
 
 export const basename = (path: string): string =>
   path.replace(/\/+$/, '').split('/').pop() || path

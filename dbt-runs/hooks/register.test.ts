@@ -1,7 +1,16 @@
 import type { RenderElement } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { deriveStatus, isDbtCommand, logWindow, parseAnsiLine, parseSummary, repoFromCommand, wrapCommand } from './dbt'
+import {
+  dbtRcPathOf,
+  deriveStatus,
+  isDbtCommand,
+  logWindow,
+  parseAnsiLine,
+  parseSummary,
+  repoFromCommand,
+  wrapCommand,
+} from './dbt'
 
 describe('detection', () => {
   test('records dbt work commands', async () => {
@@ -21,6 +30,48 @@ describe('detection', () => {
   test('never wraps a command twice', async () => {
     const wrapped = wrapCommand('dbt run', '/h/.claude/claude-modz/dbt-runs/a.log', '/h/.claude/claude-modz/dbt-runs/a.rc')
     expect(isDbtCommand(wrapped)).toBe(false)
+  })
+
+  test('ignores dbt text in heredocs, quotes and arguments', async () => {
+    expect(isDbtCommand("cat >> progress.md <<'EOF'\nTask 11: `dbt seed --select tag:team_ops` in daily_dbt\nEOF\ngit status")).toBe(false)
+    expect(isDbtCommand('cat <<-EOF > f\n\tdbt build -s x\n\tEOF')).toBe(false)
+    expect(isDbtCommand('echo "next: dbt build -s x"')).toBe(false)
+    expect(isDbtCommand("git commit -m 'dbt run fixes'")).toBe(false)
+    expect(isDbtCommand('echo dbt run')).toBe(false)
+  })
+
+  test('finds calls after env setup and past a heredoc', async () => {
+    expect(isDbtCommand('source env.sh >/dev/null && export X="$(cygpath -w "$PWD/dbt")" && dbt ls --select y')).toBe(true)
+    expect(isDbtCommand('DBT_TARGET=dev dbt build -s x')).toBe(true)
+    expect(isDbtCommand("cat > a.sql <<'EOF'\nselect 1\nEOF\ndbt run -s a")).toBe(true)
+    expect(isDbtCommand('if true; then dbt test -s x; fi')).toBe(true)
+    expect(isDbtCommand('dbt build; exit 3')).toBe(true)
+    expect(isDbtCommand('(dbt run)')).toBe(true)
+  })
+})
+
+describe('wrapping', () => {
+  const log = '/h/.claude/claude-modz/dbt-runs/a.log'
+  const rc = '/h/.claude/claude-modz/dbt-runs/a.rc'
+
+  test('each dbt call is routed through the tee, so later redirects and pipes cannot filter the log', async () => {
+    const cmd = 'cd /r && dbt build -s x > live.log 2>&1; echo "exit $?"; grep -a "Done. PASS" live.log | tail -1'
+    const wrapped = wrapCommand(cmd, log, rc)
+    expect(wrapped).toContain('cd /r && __dbt_runs_tee dbt build -s x > live.log 2>&1; echo "exit $?"; grep -a')
+    expect(wrapped).toContain(`tee -a '${log}' | perl -pe`)
+    expect(wrapped).toContain('DBT_USE_COLORS=true "$@"')
+    expect(wrapped).toContain(`'/h/.claude/claude-modz/dbt-runs/a.dbt.rc'`)
+  })
+
+  test('every call is routed; heredoc text is left alone', async () => {
+    const cmd = "cat > n.md <<'EOF'\nrun dbt build -s x later\nEOF\n./env/bin/dbt ls -s a | tail -3; dbt run -s b"
+    const wrapped = wrapCommand(cmd, log, rc)
+    expect(wrapped).toContain('\nrun dbt build -s x later\n')
+    expect(wrapped).toContain('__dbt_runs_tee ./env/bin/dbt ls -s a | tail -3; __dbt_runs_tee dbt run -s b')
+  })
+
+  test('the dbt exit code lives beside the command one', async () => {
+    expect(dbtRcPathOf(rc)).toBe('/h/.claude/claude-modz/dbt-runs/a.dbt.rc')
   })
 })
 
@@ -77,8 +128,8 @@ describe('colors', () => {
 
   test('the wrapper turns dbt colors on and strips them from what Claude reads', async () => {
     const wrapped = wrapCommand('dbt run', '/l.log', '/l.rc')
-    expect(wrapped).toContain('export DBT_USE_COLORS=true')
-    expect(wrapped).toContain("| tee '/l.log' | perl -pe")
+    expect(wrapped).toContain('DBT_USE_COLORS=true "$@"')
+    expect(wrapped).toContain("| tee -a '/l.log' | perl -pe")
   })
 })
 
@@ -103,6 +154,9 @@ describe('log window', () => {
   })
 })
 
+// On Windows the engine hands fs hooks `C:\home\t\...` for `/home/t/...`; key the fake disk on one form.
+const slashPath = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+
 test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on) => {
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
@@ -116,25 +170,25 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
     return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('fs.read', (_$, e) => {
-    const text = files.get(e.path)
+    const text = files.get(slashPath(e.path))
     if (text === undefined) throw new Error('ENOENT')
     return { value: text }
   })
   on('fs.stat', (_$, e) => {
-    const text = files.get(e.path)
+    const text = files.get(slashPath(e.path))
     if (text === undefined) throw new Error('ENOENT')
     return { value: { kind: 'file' as const, size: text.length, mtimeMs: 1, isLink: false } }
   })
   on('tool.call', { tool: 'Bash' }, (_$, e) => {
     ranCommand = e.command
-    const log = e.command.match(/tee '([^']+)'/)?.[1] ?? ''
+    const log = e.command.match(/tee -a '([^']+)'/)?.[1] ?? ''
     const models = Array.from(
       { length: 40 },
       (_, i) => `${i + 1} of 40 OK created model m${i + 1} [\u001b[32mSUCCESS ${i + 1}\u001b[0m in 1.0s]`,
     ).join('\n')
     const out = `Running with dbt=1.9\n${models}\nDone. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4\n`
-    files.set(log, out)
-    files.set(log.replace(/\.log$/, '.rc'), '0\n')
+    files.set(slashPath(log), out)
+    files.set(slashPath(log.replace(/\.log$/, '.rc')), '0\n')
     return { result: { stdout: out, stderr: '', interrupted: false } }
   })
 
@@ -148,7 +202,7 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   await $.session.start({ cwd: '/r', surface: null } as never)
   const ran = await $.tool.call({ tool: 'Bash', command: 'cd /r/ethereum-models && ./dbt-env/bin/dbt run -m x' })
 
-  expect(ranCommand).toContain("tee '/home/t/.claude/claude-modz/dbt-runs/")
+  expect(ranCommand).toContain("tee -a '/home/t/.claude/claude-modz/dbt-runs/")
   expect(ranCommand).toContain('./dbt-env/bin/dbt run -m x')
   expect(ran.deny).toBeUndefined()
 
@@ -192,7 +246,7 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   const ui = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
   expect(await ui.find({ text: /No dbt runs yet/ })).toBeDefined()
   await ui.unmount()
-  expect(removed.length).toBe(2)
+  expect(removed.length).toBe(4)
 })
 
 test('a non-dbt Bash call passes through untouched', async ($, on) => {
