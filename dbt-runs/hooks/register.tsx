@@ -28,8 +28,9 @@ const runs = atom({ plugin: 'dbt-runs', key: 'runs' } as const, [] as DbtRun[])
 const view = atom({ plugin: 'dbt-runs', key: 'view' } as const, { kind: 'list' } as DbtRunsView)
 // Whether the band above the prompt shows; runs are kept either way.
 const isShown = atom({ plugin: 'dbt-runs', key: 'isShown' } as const, false)
-// The line the run view's window ends on; 0 follows the log's end.
-const logEnd = atom({ plugin: 'dbt-runs', key: 'logEnd' } as const, 0)
+// The band scrolls a tall tree with the wheel itself; past this many lines the head is left out.
+const LOG_MAX_LINES = 2000
+const LOG_END_KEY = 'log-end'
 
 const GLYPH: Record<DbtRunStatus, { glyph: string; color: string }> = {
   running: { glyph: '●', color: 'warning' },
@@ -218,8 +219,11 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const setView = (v: DbtRunsView) => () =>
       void (async () => {
-        await update($, logEnd, () => 0)
         await update($, view, () => v)
+        // A run opens at the end of its output; the next draw has to land before the scroll can.
+        if (v.kind === 'detail') {
+          $.clock.after(100, () => void $.ui.scroll({ in: e.requestId, to: 'end' }).catch(() => undefined))
+        }
       })()
     // Letter hotkeys only: a band's digit hotkeys would answer digits typed into an empty prompt.
     const hint = (keys: string) => <Text dimColor>ctrl+x tab to focus · {keys}</Text>
@@ -230,13 +234,7 @@ export const register: Register = on => {
       const elapsed = (detail.finishedAt ?? now) - detail.startedAt
       const log = stripAnsi((await readText($, detail.logPath)) ?? '')
       const c = detail.counts
-      // Header, counts, command, position row and hint take six rows; the log gets the rest.
-      const rows = Math.max(6, e.props.maxRows - 6)
-      const win = logWindow(log, rows, await read($, logEnd))
-      const page = Math.max(1, rows - 1)
-      // Moving back onto the last line returns to following the end.
-      const moveTo = (last: number) => () =>
-        void update($, logEnd, () => (last >= win.total ? 0 : Math.max(Math.min(rows, win.total), last)))
+      const win = logWindow(log, LOG_MAX_LINES, 0)
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
@@ -275,36 +273,14 @@ export const register: Register = on => {
           <Text dimColor wrap="truncate-end">
             $ {detail.command.replace(/\s+/g, ' ')}
           </Text>
-          {log.length === 0 ? <Code source="(no output yet)" /> : <Code source={win.source} />}
-          <Box flexDirection="row" gap={1}>
+          {hint(`scroll for more · b back${detail.status === 'running' ? '' : ' · d delete'} · m minimize`)}
+          {win.first > 1 && <Text dimColor>… first {win.first - 1} lines left out (full log: {detail.logPath})</Text>}
+          <Code source={log.length === 0 ? '(no output yet)' : win.source} />
+          <Box key={LOG_END_KEY}>
             <Text dimColor>
-              lines {win.first}–{win.last} of {win.total}
-              {win.isAtEnd && detail.status === 'running' ? ' · following' : ''}
+              {detail.status === 'running' ? '● still running…' : `— end of output · ${win.total} lines —`}
             </Text>
-            {!win.isAtTop && (
-              <Button key="older" hotkey="k" dimColor onPress={moveTo(win.last - page)}>
-                ↑ older
-              </Button>
-            )}
-            {!win.isAtEnd && (
-              <Button key="newer" hotkey="j" dimColor onPress={moveTo(win.last + page)}>
-                ↓ newer
-              </Button>
-            )}
-            {!win.isAtTop && (
-              <Button key="top" hotkey="t" dimColor onPress={moveTo(rows)}>
-                top
-              </Button>
-            )}
-            {!win.isAtEnd && (
-              <Button key="end" hotkey="e" dimColor onPress={moveTo(win.total)}>
-                end
-              </Button>
-            )}
           </Box>
-          {hint(
-            `k/j older/newer · t/e top/end · b back${detail.status === 'running' ? '' : ' · d delete'} · m minimize`,
-          )}
         </Box>
       )
     }

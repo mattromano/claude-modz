@@ -139,19 +139,10 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   const row = (await detail.findAll({ type: 'Button' })).find(b => b.key?.startsWith('open-'))
   await detail.press({ key: row!.key! })
   expect(await detail.find({ text: /PASS=4/ })).toBeDefined()
-  // 42 log lines, 14 shown (maxRows 20 less 6): starts at the end, pages back, returns.
-  const position = async () => (await detail.find({ text: /lines \d+–\d+ of \d+/ }))?.text ?? ''
-  expect(await position()).toContain('lines 29–42 of 42')
-  expect(await detail.find({ type: 'Code', text: /Done\. PASS=4/ })).toBeDefined()
-  await detail.press({ key: 'older' })
-  expect(await position()).toContain('lines 16–29 of 42')
-  await detail.press({ key: 'top' })
-  expect(await position()).toContain('lines 1–14 of 42')
-  expect(await detail.find({ type: 'Code', text: /Running with dbt=1.9/ })).toBeDefined()
-  await detail.press({ key: 'newer' })
-  expect(await position()).toContain('lines 14–27 of 42')
-  await detail.press({ key: 'end' })
-  expect(await position()).toContain('lines 29–42 of 42')
+  // The whole log is drawn for the band to scroll with the wheel. (Opening at the end is
+  // $.ui.scroll, which the test kit does not answer.)
+  expect(await detail.find({ type: 'Code', text: /Running with dbt=1.9[\s\S]*Done\. PASS=4/ })).toBeDefined()
+  expect(await detail.find({ key: 'log-end' })).toBeDefined()
   await detail.press({ key: 'back' })
   expect(await detail.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
   await detail.unmount()
