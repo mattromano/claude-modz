@@ -1,11 +1,18 @@
 {
   "name": "claude-modz",
-  "owner": { "name": "Matt Romano" },
+  "owner": {
+    "name": "Matt Romano"
+  },
   "plugins": [
     {
       "name": "dbt-runs",
       "source": "./dbt-runs",
       "description": "Watch every dbt command Claude runs, live, from a band above the prompt: history, dbt colors, cleanup"
+    },
+    {
+      "name": "dbx-trace",
+      "source": "./dbx-trace",
+      "description": "Flight recorder for Databricks: every query, script and guardrail block Claude makes, in a band above the prompt and a per-session HTML trace with deep links"
     }
   ]
 }
