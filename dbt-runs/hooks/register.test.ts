@@ -1,3 +1,4 @@
+import type { RenderElement } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { deriveStatus, isDbtCommand, parseSummary, repoFromCommand, wrapCommand } from './dbt'
@@ -46,15 +47,14 @@ describe('parsing', () => {
   })
 })
 
-const PANE = {
-  component: 'Pane',
-  requestId: 'dbt-runs',
+const BAND = {
+  component: 'AbovePrompt',
   props: {
-    title: 'dbt runs',
-    isFocused: false,
-    bodyColumns: 80,
-    placement: 'dock',
-    scroll: { offset: 0, bodyRows: 40 },
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 20,
+    bodyColumns: 100,
+    scroll: { offset: 0, bodyRows: 19 },
     view: {},
   },
 } as const
@@ -66,7 +66,6 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   const files = new Map<string, string>()
   const removed: string[] = []
   let ranCommand = ''
-  const opened: string[] = []
 
   on('process.run', (_$, e) => {
     if (e.argv[0] === 'rm') removed.push(...e.argv.slice(2))
@@ -93,18 +92,10 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
 
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  const closed: string[] = []
-  on('ui.close', (_$, e) => {
-    closed.push(e.id)
-    return { value: undefined }
-  })
+  // The engine's own band: empty.
+  on('ui.render', { component: 'AbovePrompt' }, ($e, e) => h($e.ui.resolve(e).Box, {}) as RenderElement)
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.cwd', () => ({ value: '/r/fallback' }))
-  on('ui.panes', () => ({ value: [] }))
-  on('ui.open', (_$, e) => {
-    opened.push(e.id)
-    return { value: { isPlaced: true as const } }
-  })
 
   await $.session.start({ cwd: '/r', surface: null } as never)
   const ran = await $.tool.call({ tool: 'Bash', command: 'cd /r/ethereum-models && ./dbt-env/bin/dbt run -m x' })
@@ -112,38 +103,38 @@ test('a dbt Bash call is wrapped, recorded, settled and deletable', async ($, on
   expect(ranCommand).toContain("tee '/home/t/.claude/claude-modz/dbt-runs/")
   expect(ranCommand).toContain('./dbt-env/bin/dbt run -m x')
   expect(ran.deny).toBeUndefined()
-  expect(opened).toEqual(['dbt-runs'])
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'dbt-runs', surface, ...PANE })
-    expect(await ui.find({ text: /1 runs/ })).toBeDefined()
+    const ui = await $.ui.mount({ plugin: 'dbt-runs', surface, ...BAND })
+    expect(await ui.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
     expect(await ui.find({ text: /ethereum-models\s+\.\/dbt-env\/bin\/dbt run -m x/ })).toBeDefined()
     expect(await ui.find({ text: /4✓ 0⚠ 0✗/ })).toBeDefined()
     await ui.unmount()
   }
 
   // Click into the run, see its output, delete it from the detail view.
-  const detail = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
+  const detail = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
   const row = (await detail.findAll({ type: 'Button' })).find(b => b.key?.startsWith('open-'))
   await detail.press({ key: row!.key! })
   expect(await detail.find({ text: /PASS=4/ })).toBeDefined()
   expect(await detail.find({ type: 'Code', text: /Running with dbt=1.9/ })).toBeDefined()
   await detail.press({ key: 'back' })
-  expect(await detail.find({ text: /1 runs/ })).toBeDefined()
+  expect(await detail.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
   await detail.unmount()
 
-  // Minimize closes the pane but keeps the run.
-  const pane = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
-  await pane.press({ key: 'minimize' })
-  expect(closed).toEqual(['dbt-runs'])
-  await pane.unmount()
-  const reopened = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
-  expect(await reopened.find({ text: /1 runs/ })).toBeDefined()
+  // Minimize hides the band but keeps the run; /dbt-runs shows it again.
+  const band = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
+  await band.press({ key: 'minimize' })
+  expect(await band.find({ text: /dbt runs/ })).toBeUndefined()
+  await band.unmount()
+  await $.command.run({ command: 'dbt-runs', args: '' } as never)
+  const reopened = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
+  expect(await reopened.find({ text: /dbt runs · 1 ·/ })).toBeDefined()
   await reopened.unmount()
 
   const done = await $.command.run({ command: 'dbt-runs', args: 'clear' } as never)
   expect(JSON.stringify(done)).toContain('Deleted 1')
-  const ui = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...PANE })
+  const ui = await $.ui.mount({ plugin: 'dbt-runs', surface: 'terminal', ...BAND })
   expect(await ui.find({ text: /No dbt runs yet/ })).toBeDefined()
   await ui.unmount()
   expect(removed.length).toBe(2)

@@ -20,16 +20,14 @@ import {
 
 type $ = EngineInterface
 
-const PANE = 'dbt-runs'
-const TITLE = 'dbt runs'
 const STORE_PREFIX = 'run:'
 const STALE_MS = 3 * 60 * 60 * 1000
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
-// The pane scrolls; past this the full log is a `cat` away.
-const LOG_TAIL_LINES = 500
 
 const runs = atom({ plugin: 'dbt-runs', key: 'runs' } as const, [] as DbtRun[])
 const view = atom({ plugin: 'dbt-runs', key: 'view' } as const, { kind: 'list' } as DbtRunsView)
+// Whether the band above the prompt shows; runs are kept either way.
+const isShown = atom({ plugin: 'dbt-runs', key: 'isShown' } as const, false)
 
 const GLYPH: Record<DbtRunStatus, { glyph: string; color: string }> = {
   running: { glyph: '●', color: 'warning' },
@@ -138,17 +136,15 @@ const clearFinished = async ($: $, olderThanMs?: number) => {
   return ids.length
 }
 
-// Opened by the person it takes the keys; opened by a run starting it only shows.
-const openPane = ($: $, focus?: true) => $.ui.open({ id: PANE, title: TITLE, ...(focus ? { focus } : {}) })
-
-// Hides the pane only: every run stays stored, and /dbt-runs or the next run brings it back.
-const minimize = ($: $) => () => void $.ui.close({ id: PANE })
+const show = ($: $) => update($, isShown, () => true)
+// Hides the band only: every run stays stored, and /dbt-runs or the next run brings it back.
+const minimize = ($: $) => () => void update($, isShown, () => false)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'dbt-runs',
-      description: 'Open the dbt runs pane (args: clear | clear-week)',
+      description: 'Show the dbt runs band (args: clear | clear-week)',
       argumentHint: '[clear|clear-week]',
     })
     await syncFromStore($)
@@ -172,9 +168,9 @@ export const register: Register = on => {
       return { text: `Deleted ${await clearFinished($, WEEK_MS)} dbt runs older than 7 days.` }
     }
     await update($, view, (): DbtRunsView => ({ kind: 'list' }))
-    await openPane($, true)
+    await show($)
 
-    return { text: 'dbt runs pane opened.' }
+    return { text: 'dbt runs shown above the prompt.' }
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -196,8 +192,7 @@ export const register: Register = on => {
       bytes: 0,
     }
     await saveRun($, run)
-    const panes = await $.ui.panes()
-    if (!panes.some(p => p.id === PANE)) void openPane($)
+    await show($)
 
     const ran = await next({ ...e, command: wrapCommand(e.command, run.logPath, run.rcPath) })
     if (ran.deny !== undefined) {
@@ -210,16 +205,18 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  // The band above the prompt sits at the bottom in every layout, where a pane docks to the side in fullscreen.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || !(await read($, isShown))) return next(e)
+
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const width = Math.max(20, e.props.bodyColumns)
     const list = await read($, runs)
     const current = await read($, view)
     const now = await $.clock.now()
     const setView = (v: DbtRunsView) => () => void update($, view, () => v)
-    const hint = (keys: string) => (
-      <Text dimColor>{e.props.isFocused ? keys : 'ctrl+x tab to focus this pane'}</Text>
-    )
+    // Letter hotkeys only: a band's digit hotkeys would answer digits typed into an empty prompt.
+    const hint = (keys: string) => <Text dimColor>ctrl+x tab to focus · {keys}</Text>
 
     const detail = current.kind === 'detail' ? list.find(r => r.id === current.id) : undefined
     if (detail !== undefined) {
@@ -230,6 +227,16 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
+            <Text>
+              <Text color={color}>{glyph} </Text>
+              <Text bold>{detail.status}</Text>
+              <Text dimColor>
+                {' '}
+                · {detail.repo} · {formatTime(detail.startedAt, now)} · {formatDuration(elapsed)} ·{' '}
+                {formatBytes(detail.bytes)}
+                {detail.exitCode !== undefined ? ` · exit ${detail.exitCode}` : ''}
+              </Text>
+            </Text>
             <Button key="back" hotkey="b" autoFocus onPress={setView({ kind: 'list' })}>
               Back
             </Button>
@@ -242,16 +249,6 @@ export const register: Register = on => {
               Minimize
             </Button>
           </Box>
-          <Text>
-            <Text color={color}>{glyph} </Text>
-            <Text bold>{detail.status}</Text>
-            <Text dimColor>
-              {' '}
-              · {detail.repo} · {formatTime(detail.startedAt, now)} · {formatDuration(elapsed)} ·{' '}
-              {formatBytes(detail.bytes)}
-              {detail.exitCode !== undefined ? ` · exit ${detail.exitCode}` : ''}
-            </Text>
-          </Text>
           {c !== undefined && (
             <Text>
               <Text color="success">PASS={c.pass} </Text>
@@ -262,11 +259,13 @@ export const register: Register = on => {
               </Text>
             </Text>
           )}
-          {hint(detail.status === 'running' ? 'b back · m minimize' : 'b back · d delete · m minimize')}
-          <Text dimColor wrap="wrap">
-            $ {detail.command}
+          <Text dimColor wrap="truncate-end">
+            $ {detail.command.replace(/\s+/g, ' ')}
           </Text>
-          <Code source={log.length > 0 ? tailLines(log, LOG_TAIL_LINES) : '(no output yet)'} />
+          <Code
+            source={log.length > 0 ? tailLines(log, Math.max(8, e.props.maxRows - 5)) : '(no output yet)'}
+          />
+          {hint(detail.status === 'running' ? 'b back · m minimize' : 'b back · d delete · m minimize')}
         </Box>
       )
     }
@@ -274,11 +273,14 @@ export const register: Register = on => {
     const totalBytes = list.reduce((sum, r) => sum + r.bytes, 0)
     return (
       <Box flexDirection="column">
-        <Text>
-          <Text bold>{list.length} runs</Text>
-          <Text dimColor> · {formatBytes(totalBytes)} on disk</Text>
-        </Text>
         <Box flexDirection="row" gap={1}>
+          <Text>
+            <Text bold>dbt runs</Text>
+            <Text dimColor>
+              {' '}
+              · {list.length} · {formatBytes(totalBytes)} on disk
+            </Text>
+          </Text>
           {list.length > 0 && (
             <Button key="clear-finished" hotkey="c" dimColor onPress={() => void clearFinished($)}>
               Clear finished
@@ -293,35 +295,31 @@ export const register: Register = on => {
             Minimize
           </Button>
         </Box>
-        {list.length > 0 && hint('1-9 open · ↑↓ move · Enter open · c clear finished · w clear >7d · m minimize')}
         {list.length === 0 && <Text dimColor>No dbt runs yet. They appear here as Claude runs them.</Text>}
         {list.map((run, i) => {
           const { glyph, color } = GLYPH[run.status]
           const elapsed = (run.finishedAt ?? now) - run.startedAt
-          const head = `${formatTime(run.startedAt, now)}  ${run.repo}  `
+          const time = formatTime(run.startedAt, now)
           const cmd = run.command.replace(/^.*?(?=\S*dbt\s)/s, '').replace(/\s+/g, ' ')
           const c = run.counts
+          const stats = `${formatDuration(elapsed)} · ${formatBytes(run.bytes)}${
+            c !== undefined ? ` · ${c.pass}✓ ${c.warn}⚠ ${c.error}✗ ${c.skip}↷` : ''
+          }`
           return (
-            <Box key={`row-${run.id}`} flexDirection="column">
-              <Box flexDirection="row">
-                <Text color={color}>{glyph} </Text>
-                <Button
-                  key={`open-${run.id}`}
-                  plain
-                  {...(i < 9 ? { hotkey: String(i + 1) } : {})}
-                  {...(i === 0 ? { autoFocus: true as const } : {})}
-                  onPress={setView({ kind: 'detail', id: run.id })}
-                  label={truncate(head + cmd, width - (i < 9 ? 5 : 2))}
-                />
-              </Box>
-              <Text dimColor>
-                {'  '}
-                {formatDuration(elapsed)} · {formatBytes(run.bytes)}
-                {c !== undefined ? ` · ${c.pass}✓ ${c.warn}⚠ ${c.error}✗ ${c.skip}↷` : ''}
-              </Text>
+            <Box key={`row-${run.id}`} flexDirection="row">
+              <Text color={color}>{glyph} </Text>
+              <Button
+                key={`open-${run.id}`}
+                plain
+                {...(i === 0 ? { autoFocus: true as const } : {})}
+                onPress={setView({ kind: 'detail', id: run.id })}
+                label={truncate(`${time}  ${run.repo}  ${cmd}`, Math.max(10, width - stats.length - 4))}
+              />
+              <Text dimColor> {stats}</Text>
             </Box>
           )
         })}
+        {list.length > 0 && hint('↑↓ move · Enter open · c clear finished · w clear >7d · m minimize')}
       </Box>
     )
   })
