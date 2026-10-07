@@ -63,6 +63,18 @@ const columnNames = (cols: unknown): string[] | undefined =>
   Array.isArray(cols) ? cols.map(c => (isObj(c) ? String(c.name ?? c.column_name ?? '') : String(c))) : undefined
 
 /** Finds a table in a parsed result: an array of objects, or columns beside an array of arrays. */
+/**
+ * One row's cells: a plain array, or the DBSQL statement API's `{ values: [{ string_value }] }`
+ * (a null cell is `{ null_value }` or `{}`). Anything else is not a row.
+ */
+const cellsOf = (row: unknown): unknown[] | undefined => {
+  if (Array.isArray(row)) return row
+  if (!isObj(row) || !Array.isArray(row.values)) return undefined
+  return row.values.map(cell =>
+    isObj(cell) ? (cell.string_value ?? cell.number_value ?? cell.bool_value ?? null) : cell,
+  )
+}
+
 const findTable = (value: unknown, depth = 0): Obj[] | undefined => {
   if (depth > 6) return undefined
   if (Array.isArray(value)) {
@@ -73,8 +85,9 @@ const findTable = (value: unknown, depth = 0): Obj[] | undefined => {
   const schema = isObj(value.manifest) && isObj(value.manifest.schema) ? value.manifest.schema.columns : undefined
   const names = columnNames(value.columns ?? schema)
   const data = isObj(value.result) ? value.result.data_array : (value.data_array ?? value.rows ?? value.data)
-  if (names !== undefined && Array.isArray(data) && data.every(Array.isArray)) {
-    return data.map(row => Object.fromEntries(names.map((n, i) => [n, (row as unknown[])[i]])))
+  const rows = Array.isArray(data) ? data.map(cellsOf) : undefined
+  if (names !== undefined && rows !== undefined && rows.every(r => r !== undefined)) {
+    return rows.map(row => Object.fromEntries(names.map((n, i) => [n, row![i]])))
   }
   for (const child of Object.values(value)) {
     const found = findTable(child, depth + 1)
