@@ -23,13 +23,16 @@ The band also appears by itself whenever a dbt run starts.
 
 ## How it works
 
-A dbt command is wrapped so its output is copied to `~/.claude/claude-modz/dbt-runs/<run>.log` as it streams:
+Each dbt call in a Bash command is routed through a shell function that copies dbt's own output to `~/.claude/claude-modz/dbt-runs/<run>.log` as it streams:
 
 ```
-{ ( export DBT_USE_COLORS=true; <cmd> ) ; echo $? > <run>.rc ; } 2>&1 | tee <run>.log | perl -pe '<strip colors>' ; ( exit "$(cat <run>.rc)" )
+__dbt_runs_tee() { { DBT_USE_COLORS=true "$@"; echo $? > <step> ; } 2>&1 | tee -a <run>.log | perl -pe '<strip colors>' ; ... }
+{ ( <cmd, with each `dbt <subcmd>` prefixed by __dbt_runs_tee> ) ; echo $? > <run>.rc ; } ; ( exit "$(cat <run>.rc)" )
 ```
 
-The log keeps dbt's colors for the band. Claude sees the same output without the color codes, and the same exit code. One side effect: a `cd` inside a dbt command doesn't carry over to the next Bash call.
+The tee sits on the dbt call itself, so the log is complete even when the command redirects dbt (`> build.log 2>&1`) or filters it (`| tail -3`, `| grep Done`); only dbt's output is logged, not the rest of the command's. The log keeps dbt's colors for the band. Claude sees the same output without the color codes, and the same exit code.
+
+The run's status comes from dbt's own exit code (`<run>.dbt.rc`, the last failing call wins), not from whatever ran last in the command. `dbt <subcmd>` text inside a heredoc or a quoted string is not a call and is left alone. Not caught: dbt started from inside another script (a `dbt.sh` wrapper) or a `bash -c "..."` string. One side effect: a `cd` inside a dbt command doesn't carry over to the next Bash call.
 
 ## Try it without a warehouse
 
