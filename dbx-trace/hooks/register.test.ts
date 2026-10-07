@@ -189,11 +189,25 @@ const BAND = {
 
 const TOOL = 'mcp__databricks__execute_sql'
 
+// On Windows the engine hands fs hooks `C:\r\...` for `/r/...`; the fake disk keys on one form.
+const slashPath = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+class FakeDisk extends Map<string, string> {
+  override get(path: string) {
+    return super.get(slashPath(path))
+  }
+  override set(path: string, text: string) {
+    return super.set(slashPath(path), text)
+  }
+  override has(path: string) {
+    return super.has(slashPath(path))
+  }
+}
+
 const harness = (on: Parameters<TestBody>[1]) => {
   mock.store(on)
   mock.env(on, { HOME: '/home/t' })
   mock.clock(on, { now: Date.UTC(2026, 9, 6, 12) })
-  const files = new Map<string, string>()
+  const files = new FakeDisk()
   const ran: string[][] = []
   const sent: Record<string, unknown>[] = []
   const mcpCalls: { server: string; tool: string; args: Record<string, unknown> }[] = []
